@@ -1,0 +1,76 @@
+run_name: "mind_small_demo"
+
+data:
+  raw_root: "data/raw"
+  dataset_name: "MINDsmall"
+  train_dir: "MINDsmall_train"
+  dev_dir: "MINDsmall_dev"
+  processed_root: "data/processed"
+  max_history: 50
+  min_user_hist_for_warm: 5
+  min_item_train_clicks_for_warm: 10
+  negative_sampling:
+    enabled: false  # Use in-impression negatives by default
+  sub_sample:
+    enabled: true
+    train_impressions: 200000
+    dev_impressions: 50000
+    seed: 13
+
+teacher:
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  batch_size: 128
+  max_text_len: 192
+  user_pooling: "attention"  # attention|mean
+  user_attn_heads: 4
+  user_attn_dim: 256
+  lr: 2.0e-4
+  epochs: 1
+  device: "cuda"  # cuda|cpu
+
+retrieval:
+  index_type: "flat_ip"  # flat_ip|ivf_flat_ip
+  ivf_nlist: 2048
+  topk: 200
+
+ranker:
+  batch_size: 1024
+  lr: 1.0e-3
+  weight_decay: 1.0e-6
+  epochs: 2
+  device: "cuda"
+  dlrm:
+    emb_dim: 64
+    bottom_mlp: [128, 64]
+    top_mlp: [256, 128, 1]
+    dropout: 0.1
+  distill:
+    enabled: true
+    temperature: 2.0
+    lambda_logit: 1.0
+    lambda_repr: 0.1
+    cold_weight: 2.0
+    warm_weight: 0.3
+
+rerank:
+  k_out: 10
+  pool_size: 50
+  position_bias: "log"  # log|linear
+  relevance_weight: 0.85
+  novelty_weight: 0.10
+  coverage_weight: 0.05
+  novelty_sim: "teacher_cosine"  # teacher_cosine|entity_jaccard|category
+  coverage:
+    max_new_entities_per_item: 3
+    category_bonus: 1.0
+    entity_bonus: 0.3
+  fairness:
+    enabled: true
+    category_target: "catalog"  # catalog|uniform
+    provider_target: "catalog"
+    new_item_floor: 0.15  # minimum fraction of exposure in top-k to new items
+    penalty_weight: 0.5
+
+eval:
+  ks: [5, 10]
+  plot_curves: true

@@ -1,0 +1,6 @@
+# Ignore all files under any data folder
+**/data/**
+
+# Keep data files under scripts/data
+!scripts/data/
+!scripts/data/**
