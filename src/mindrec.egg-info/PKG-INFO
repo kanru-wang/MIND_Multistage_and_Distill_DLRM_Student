@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: mindrec
+Version: 0.1.0
+Summary: MIND multi-stage recommender: retrieval + DLRM ranker + reranking with distillation, diversity, fairness
+Requires-Python: >=3.10

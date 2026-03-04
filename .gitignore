@@ -8,3 +8,8 @@
 # Ignore local virtual environments
 .venv/
 venv/
+
+# Ignore Python cache/bytecode files
+__pycache__/
+*.pyc
+*.pyo

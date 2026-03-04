@@ -36,6 +36,7 @@ This repo is designed to run on a powerful Windows laptop:
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ---

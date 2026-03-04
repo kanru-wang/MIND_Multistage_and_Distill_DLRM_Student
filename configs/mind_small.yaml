@@ -12,7 +12,7 @@ data:
   negative_sampling:
     enabled: false  # Use in-impression negatives by default
   sub_sample:
-    enabled: true
+    enabled: false
     train_impressions: 200000
     dev_impressions: 50000
     seed: 13
