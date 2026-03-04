@@ -17,57 +17,67 @@ def _add_config_arg(p: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
-    parser=argparse.ArgumentParser(prog="mindrec")
-    sub=parser.add_subparsers(dest="cmd", required=True)
+    parser = argparse.ArgumentParser(prog="mindrec")
+    sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p=sub.add_parser("preprocess", help="Parse raw MIND TSV into processed parquet")
+    p = sub.add_parser("preprocess", help="Parse raw MIND TSV into processed parquet")
     _add_config_arg(p)
 
-    p=sub.add_parser("train_teacher", help="Train/compute teacher embeddings (item+user)")
+    p = sub.add_parser(
+        "train_teacher", help="Train/compute teacher embeddings (item+user)"
+    )
     _add_config_arg(p)
 
-    p=sub.add_parser("build_index", help="Build Faiss ANN index for retrieval")
+    p = sub.add_parser("build_index", help="Build Faiss ANN index for retrieval")
     _add_config_arg(p)
 
-    p=sub.add_parser("eval_retrieval", help="Evaluate retrieval recall@K on dev impressions")
+    p = sub.add_parser(
+        "eval_retrieval", help="Evaluate retrieval recall@K on dev impressions"
+    )
     _add_config_arg(p)
 
-    p=sub.add_parser("train_ranker", help="Train DLRM student ranker with distillation")
+    p = sub.add_parser(
+        "train_ranker", help="Train DLRM student ranker with distillation"
+    )
     _add_config_arg(p)
 
-    p=sub.add_parser("evaluate", help="Evaluate ranker on dev impressions (many metrics)")
+    p = sub.add_parser(
+        "evaluate", help="Evaluate ranker on dev impressions (many metrics)"
+    )
     _add_config_arg(p)
 
-    p=sub.add_parser("rerank_eval", help="Evaluate diversity+coverage+fairness reranker")
+    p = sub.add_parser(
+        "rerank_eval", help="Evaluate diversity+coverage+fairness reranker"
+    )
     _add_config_arg(p)
 
-    args=parser.parse_args()
-    cfg=load_config(args.config)
+    args = parser.parse_args()
+    cfg = load_config(args.config)
 
-    if args.cmd=="preprocess":
+    if args.cmd == "preprocess":
         run_preprocess(cfg)
         return
-    if args.cmd=="train_teacher":
+    if args.cmd == "train_teacher":
         run_train_teacher(cfg)
         return
-    if args.cmd=="build_index":
+    if args.cmd == "build_index":
         run_build_index(cfg)
         return
-    if args.cmd=="eval_retrieval":
+    if args.cmd == "eval_retrieval":
         run_eval_retrieval(cfg)
         return
-    if args.cmd=="train_ranker":
+    if args.cmd == "train_ranker":
         run_train_ranker(cfg)
         return
-    if args.cmd=="evaluate":
+    if args.cmd == "evaluate":
         run_evaluate(cfg)
         return
-    if args.cmd=="rerank_eval":
+    if args.cmd == "rerank_eval":
         run_rerank_eval(cfg)
         return
 
     raise RuntimeError(f"Unknown command: {args.cmd}")
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

@@ -4,3 +4,7 @@
 # Keep data files under scripts/data
 !scripts/data/
 !scripts/data/**
+
+# Ignore local virtual environments
+.venv/
+venv/

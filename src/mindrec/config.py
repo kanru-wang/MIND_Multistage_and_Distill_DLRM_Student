@@ -13,6 +13,6 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 
 def ensure_dir(path: str | Path) -> Path:
-    p=Path(path)
+    p = Path(path)
     p.mkdir(parents=True, exist_ok=True)
     return p
