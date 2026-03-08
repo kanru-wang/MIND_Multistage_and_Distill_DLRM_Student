@@ -1,0 +1,6 @@
+{
+  "index_type": "flat_ip",
+  "ivf_nlist": 2048,
+  "n_items": 65239,
+  "dim": 384
+}
