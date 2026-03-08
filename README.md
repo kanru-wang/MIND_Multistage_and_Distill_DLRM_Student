@@ -13,11 +13,22 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
 - A **DLRM-style** ranker (dense MLP + sparse embeddings + feature interaction).
 - Knowledge **distillation** (logit + representation) from a powerful teacher into a cheaper student (better cold/new performance vs training the student from scratch).
 
+#### Teacher model (simple view)
+- The teacher is a pair of encoders:
+- a **news/item encoder** that maps each article into an embedding vector
+- a **user encoder** that maps a user’s recent clicked history into an embedding vector
+- Training goal (standard retrieval idea): make clicked `(user, news)` pairs close in embedding space, and non-clicked pairs farther apart (contrastive learning with in-batch/sampled negatives).
+
 #### Evaluation (many angles)
 - **Ranking quality**: AUC, MRR, nDCG@K, MAP@K, Recall@K
 - **Calibration**: ECE (expected calibration error), Brier score
 - **Diversity**: intra-list diversity (ILD), category/entity coverage@K, entropy@K
 - **Exposure fairness**: position-weighted exposure, disparity vs target distribution (KL / L1 / Gini), new-item exposure floor
+
+#### Re-ranking (important implementation note)
+- In this project, re-ranking is a **deterministic optimization layer** on top of ranker scores.
+- It is controlled by hyperparameters/constraints (relevance, novelty, coverage, fairness).
+- **No training loop is required** for this re-ranking stage.
 
 ---
 
@@ -49,6 +60,40 @@ data/raw/MINDsmall_train/
 data/raw/MINDsmall_dev/
 ```
 Each folder should contain `behaviors.tsv` and `news.tsv`.
+
+MIND also provides `entity_embedding.vec` and `relation_embedding.vec`.
+In this repo, for simplicity, these two files are currently **not used** by the pipeline.
+
+---
+
+## 2.1) Quick terminology: entities in MIND
+
+- In MIND, an **entity** is a named entity extracted from a news article (person, organization, location, etc.) and linked to a knowledge graph (the MIND paper references Wikidata).
+- `entity_embedding.vec`: embedding vector for each entity ID.
+- `relation_embedding.vec`: embedding vector for each relation type between entities.
+
+If you choose to use these files, a common approach is to use KG triples `(entity, relation, entity)` to fetch neighbors of entities mentioned in a news article, then build richer representations (for example with graph attention or memory-network style modules).
+
+---
+
+## 2.2) What `run_preprocess()` does (plain English)
+
+`run_preprocess()` converts raw MIND TSV files into model-ready parquet/json files.
+
+Main steps:
+- Read `news.tsv` and `behaviors.tsv` from train/dev.
+- Build ID mappings (`user_id/news_id/category/subcategory -> integer index`).
+- Build pairwise training rows for ranker training (`train_pairs.parquet` and `dev_pairs.parquet`).
+- Build impression-level dev data for evaluation (`dev_impressions.parquet`).
+
+How pairs are created:
+- For an impression with `P` positives and `N` negatives, this code contributes:
+- `P * (1 + min(4, N))` pairs
+- because each positive is paired with up to 4 sampled negatives.
+
+Why there is no `train_impressions.parquet`:
+- Training uses pairwise rows (`train_pairs.parquet`), not full impression-grouped rows.
+- Impression-grouped data is mainly needed for ranking evaluation, so only `dev_impressions.parquet` is generated.
 
 ---
 
@@ -98,4 +143,3 @@ Artifacts go to `runs/<run_name>/`.
 MIND includes strong **category/subcategory** metadata. For “provider” fairness, this repo supports:
 - **category/subcategory** as providers (default), and/or
 - **entity clusters** as proxy providers (optional)
-If you have explicit publisher/source metadata, you can plug it in as provider id.
