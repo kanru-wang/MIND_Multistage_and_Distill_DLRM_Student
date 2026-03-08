@@ -9,7 +9,7 @@ from sklearn.metrics import roc_auc_score
 def dcg_at_k(labels: np.ndarray, scores: np.ndarray, k: int) -> float:
     order = np.argsort(-scores)[:k]
     gains = labels[order]
-    discounts = 1.0 / np.log2(np.arange(2, k + 2))
+    discounts = 1.0 / np.log2(np.arange(2, len(order) + 2))
     return float((gains * discounts).sum())
 
 

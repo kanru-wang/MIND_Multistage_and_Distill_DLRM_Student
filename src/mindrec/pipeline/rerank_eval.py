@@ -194,11 +194,8 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             )
             rr_ids = rr["ranked_news_id"]
             rr_idx = [cand_news_id.index(nid) for nid in rr_ids]
-            rr_scores = scores[rr_idx]
-            rr_ndcg.append(
-                ndcg_at_k(labels, scores, k_out)
-            )  # same definition vs all candidates
-            rr_recall.append(recall_at_k(labels, scores, k_out))
+            rr_ndcg.append(ndcg_from_order(labels, np.array(rr_idx), k_out))
+            rr_recall.append(recall_from_order(labels, np.array(rr_idx), k_out))
 
             rr_cats = [
                 news_meta.get(nid).cat_idx if nid in news_meta else 0 for nid in rr_ids

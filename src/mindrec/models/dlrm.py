@@ -73,6 +73,7 @@ class DLRMStudent(nn.Module):
             dense_dim, bottom_mlp, dropout=dropout, last_activation=True
         )
         d_bottom = bottom_mlp[-1]
+        self.xd_proj = nn.Linear(d_bottom, emb_dim)
 
         self.use_teacher = teacher_dim is not None
         self.teacher_dim = teacher_dim
@@ -125,8 +126,6 @@ class DLRMStudent(nn.Module):
         # xd has d_bottom, not emb_dim; use a linear projection to emb_dim via a simple padding/truncation trick
         # but keep the raw xd for top-mlp too.
         # To keep it simple, create xd_emb with a learned linear mapping:
-        if not hasattr(self, "xd_proj"):
-            self.xd_proj = nn.Linear(xd.size(1), eu.size(1)).to(xd.device)
         xd_emb = self.xd_proj(xd)
 
         feats = [xd_emb, eu, ei, ec, es] + extras

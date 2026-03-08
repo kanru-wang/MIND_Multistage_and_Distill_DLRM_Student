@@ -104,6 +104,7 @@ def greedy_rerank(
         raise ValueError(f"Unknown novelty_sim: {novelty_sim}")
 
     chosen = []
+    chosen_idx = []
     chosen_set = set()
     chosen_cats = set()
     chosen_ents = set()
@@ -112,10 +113,10 @@ def greedy_rerank(
     ent_bonus = float(coverage_cfg.get("entity_bonus", 0.3))
 
     def novelty(i: int) -> float:
-        if not chosen:
+        if not chosen_idx:
             return 0.0
         if novelty_sim == "teacher_cosine" and sim_mat is not None:
-            sims = [float(sim_mat[i, j]) for j in chosen]
+            sims = [float(sim_mat[i, j]) for j in chosen_idx]
             return -max(sims)
         if novelty_sim == "category":
             ci = news_meta.get(pool[i], NewsMeta(0, 0, set())).cat_idx
@@ -125,14 +126,14 @@ def greedy_rerank(
                     if ci == news_meta.get(pool[j], NewsMeta(0, 0, set())).cat_idx
                     else 0.0
                 )
-                for j in chosen
+                for j in chosen_idx
             ]
             return -max(sims)
         # entity_jaccard
         ei = news_meta.get(pool[i], NewsMeta(0, 0, set())).ent
         sims = [
             jaccard(ei, news_meta.get(pool[j], NewsMeta(0, 0, set())).ent)
-            for j in chosen
+            for j in chosen_idx
         ]
         return -max(sims)
 
@@ -183,6 +184,7 @@ def greedy_rerank(
     # Greedy selection
     for _ in range(min(k_out, len(pool))):
         best = None
+        best_i = None
         best_val = -1e18
         for i, nid in enumerate(pool):
             if nid in chosen_set:
@@ -203,10 +205,12 @@ def greedy_rerank(
             if val > best_val:
                 best_val = val
                 best = nid
+                best_i = i
 
         if best is None:
             break
         chosen.append(best)
+        chosen_idx.append(int(best_i))
         chosen_set.add(best)
         m = news_meta.get(best, NewsMeta(0, 0, set()))
         if m.cat_idx != 0:
