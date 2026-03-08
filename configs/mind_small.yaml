@@ -21,7 +21,7 @@ teacher:
   model_name: "sentence-transformers/all-MiniLM-L6-v2"
   batch_size: 128
   max_text_len: 192
-  user_pooling: "attention"  # attention|mean
+  user_pooling: "smart"  # smart|mean (attention is a legacy alias to smart)
   user_attn_heads: 4
   user_attn_dim: 256
   lr: 2.0e-4

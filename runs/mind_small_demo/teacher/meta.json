@@ -2,5 +2,5 @@
   "model_name": "sentence-transformers/all-MiniLM-L6-v2",
   "dim": 384,
   "device": "cpu",
-  "pooling": "attention"
+  "pooling": "smart"
 }
