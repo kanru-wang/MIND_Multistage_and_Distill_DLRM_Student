@@ -90,6 +90,7 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             cand_subcat_idx = np.array(r["cand_subcat_idx"], dtype=np.int64)
             cand_is_new = list(r["cand_is_new_item"])
             cand_clicks_log1p = np.array(r["cand_item_clicks_log1p"], dtype=np.float32)
+            cand_cat_ref = [int(c) for c in cand_cat_idx.tolist() if int(c) != 0]
             hlen = float(r["history_len"])
             dense = np.stack(
                 [np.full_like(cand_clicks_log1p, hlen), cand_clicks_log1p], axis=1
@@ -136,8 +137,6 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
 
             # Baseline: top-k_out by relevance
             base_order = np.argsort(-scores)[:k_out]
-            base_scores = scores[base_order]
-            base_labels = labels[base_order]
             base_ndcg.append(ndcg_at_k(labels, scores, k_out))
             base_recall.append(recall_at_k(labels, scores, k_out))
 
@@ -160,9 +159,9 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             w = position_bias_weights(k_out, mode=pos_mode)
             exp = normalize_dist(exposure_from_ranking(base_cats, w))
             tgt = (
-                uniform_target(base_cats)
+                uniform_target(cand_cat_ref)
                 if fairness_cfg.get("category_target", "catalog") == "uniform"
-                else catalog_target(base_cats)
+                else catalog_target(cand_cat_ref)
             )
             tgt = normalize_dist(tgt)
             base_fair_kl.append(kl_divergence(exp, tgt))
@@ -209,9 +208,9 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
 
             exp2 = normalize_dist(exposure_from_ranking(rr_cats, w))
             tgt2 = (
-                uniform_target(rr_cats)
+                uniform_target(cand_cat_ref)
                 if fairness_cfg.get("category_target", "catalog") == "uniform"
-                else catalog_target(rr_cats)
+                else catalog_target(cand_cat_ref)
             )
             tgt2 = normalize_dist(tgt2)
             rr_fair_kl.append(kl_divergence(exp2, tgt2))

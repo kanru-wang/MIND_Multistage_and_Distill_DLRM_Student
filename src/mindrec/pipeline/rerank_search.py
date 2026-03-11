@@ -138,6 +138,11 @@ def _evaluate_baseline(
     for row in scored_impressions:
         base_order = np.argsort(-row.scores)[:k_out]
         base_ids = [row.cand_news_id[i] for i in base_order.tolist()]
+        cand_cat_ref = [
+            news_meta.get(nid).cat_idx
+            for nid in row.cand_news_id
+            if nid in news_meta and news_meta.get(nid).cat_idx != 0
+        ]
         base_cats = [
             news_meta.get(nid).cat_idx if nid in news_meta else 0 for nid in base_ids
         ]
@@ -153,9 +158,9 @@ def _evaluate_baseline(
 
         exp = normalize_dist(exposure_from_ranking(base_cats, w))
         tgt = (
-            uniform_target(base_cats)
+            uniform_target(cand_cat_ref)
             if category_target == "uniform"
-            else catalog_target(base_cats)
+            else catalog_target(cand_cat_ref)
         )
         tgt = normalize_dist(tgt)
         base_fair_kl.append(kl_divergence(exp, tgt))
@@ -207,6 +212,11 @@ def _evaluate_candidate(
     for row in scored_impressions:
         pool_order = np.argsort(-row.scores)[:pool_size]
         pool_emb = teacher_item[row.cand_news_idx[pool_order]]
+        cand_cat_ref = [
+            news_meta.get(nid).cat_idx
+            for nid in row.cand_news_id
+            if nid in news_meta and news_meta.get(nid).cat_idx != 0
+        ]
         rr = greedy_rerank(
             cand_news_id=row.cand_news_id,
             cand_scores=row.scores,
@@ -238,9 +248,9 @@ def _evaluate_candidate(
 
         exp = normalize_dist(exposure_from_ranking(rr_cats, w))
         tgt = (
-            uniform_target(rr_cats)
+            uniform_target(cand_cat_ref)
             if fairness_cfg.get("category_target", "catalog") == "uniform"
-            else catalog_target(rr_cats)
+            else catalog_target(cand_cat_ref)
         )
         tgt = normalize_dist(tgt)
         rr_fair_kl.append(kl_divergence(exp, tgt))

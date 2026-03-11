@@ -21,3 +21,8 @@ Position-weighted exposure uses a bias curve v(pos) (log or linear).
 - **KL / L1 disparity**: compare exposure distribution vs target distribution (catalog or uniform).
 - **Gini**: inequality of exposure allocation across groups.
 - **New-item exposure fraction**: how much position-weighted exposure is allocated to items tagged as new/rare.
+
+Target definition note:
+- `catalog` target means the empirical category mix of the impression candidate pool.
+- `uniform` target means equal mass across the categories present in that impression candidate pool.
+- The target is not derived from the selected top-K list, and `catalog` here is not a global full-corpus category prior.

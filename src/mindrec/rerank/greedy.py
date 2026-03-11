@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,8 +10,6 @@ import numpy as np
 from mindrec.metrics.diversity import jaccard
 from mindrec.metrics.fairness import (
     catalog_target,
-    exposure_from_ranking,
-    gini,
     kl_divergence,
     l1_distance,
     normalize_dist,
@@ -64,6 +63,17 @@ def cosine_sim_matrix(x: np.ndarray) -> np.ndarray:
     return x @ x.T
 
 
+def _linear_exposure_from_counts(
+    counts: dict[int, int], pos_sums: dict[int, int], k: int
+) -> dict[int, float]:
+    if k <= 0:
+        return {}
+    return {
+        gid: float(count) - (float(pos_sums.get(gid, 0)) / float(k))
+        for gid, count in counts.items()
+    }
+
+
 def greedy_rerank(
     cand_news_id: list[str],
     cand_scores: np.ndarray,
@@ -82,16 +92,14 @@ def greedy_rerank(
     # Work on top pool_size by relevance
     order = np.argsort(-cand_scores)[:pool_size]
     pool = [cand_news_id[i] for i in order]
+    pool_index = {nid: i for i, nid in enumerate(pool)}
     pool_scores = cand_scores[order]
     pool_is_new = [int(cand_is_new[i]) for i in order]
+    pool_cats = [news_meta.get(nid, NewsMeta(0, 0, set())).cat_idx for nid in pool]
 
     # Precompute similarity for novelty
     sim_mat = None
     if novelty_sim == "teacher_cosine":
-        idx = [
-            int(news_meta.get(nid, NewsMeta(0, 0, set())).cat_idx) for nid in pool
-        ]  # placeholder
-        # Use item teacher embeddings by news_idx: we don't have news_idx here; approximate by hashing news_id? Not ok.
         # In this repo, we store teacher embeddings by news_idx. So we also expect caller to pass emb vectors for pool directly.
         # Here we'll accept item_teacher_emb already as [pool_size,D] embeddings.
         x = item_teacher_emb.astype(np.float32)
@@ -108,9 +116,28 @@ def greedy_rerank(
     chosen_set = set()
     chosen_cats = set()
     chosen_ents = set()
+    chosen_exp_by_cat: dict[int, float] = {}
+    chosen_cat_counts: Counter[int] = Counter()
+    chosen_cat_pos_sums: dict[int, int] = {}
+    chosen_new_count = 0
+    chosen_new_pos_sum = 0
+    chosen_new_exp = 0.0
     max_new_ent = int(coverage_cfg.get("max_new_entities_per_item", 3))
     cat_bonus = float(coverage_cfg.get("category_bonus", 1.0))
     ent_bonus = float(coverage_cfg.get("entity_bonus", 0.3))
+    pos_mode = fairness_cfg.get("position_bias", "log")
+    weights_by_len = {
+        k: position_bias_weights(k, mode=pos_mode) for k in range(1, k_out + 1)
+    }
+    total_exp_by_len = {
+        k: float(weights.sum()) for k, weights in weights_by_len.items()
+    }
+
+    target_mode = fairness_cfg.get("category_target", "catalog")
+    if target_mode == "uniform":
+        target_dist = normalize_dist(uniform_target([c for c in pool_cats if c != 0]))
+    else:
+        target_dist = normalize_dist(catalog_target([c for c in pool_cats if c != 0]))
 
     def novelty(i: int) -> float:
         if not chosen_idx:
@@ -147,35 +174,42 @@ def greedy_rerank(
             bonus += ent_bonus * float(min(len(new_ents), max_new_ent))
         return bonus
 
-    def fairness_penalty(ranked_ids: list[str]) -> float:
+    def fairness_penalty(i: int) -> float:
         if not fairness_cfg.get("enabled", False):
             return 0.0
-        k = len(ranked_ids)
-        w = position_bias_weights(k, mode=fairness_cfg.get("position_bias", "log"))
-        cats = [news_meta.get(nid, NewsMeta(0, 0, set())).cat_idx for nid in ranked_ids]
-        exp = normalize_dist(exposure_from_ranking(cats, w))
-
-        target_mode = fairness_cfg.get("category_target", "catalog")
-        if target_mode == "uniform":
-            tgt = uniform_target(cats)
+        k = len(chosen) + 1
+        cat_i = pool_cats[i]
+        if pos_mode == "linear":
+            trial_counts = dict(chosen_cat_counts)
+            if cat_i != 0:
+                trial_counts[cat_i] = trial_counts.get(cat_i, 0) + 1
+            trial_pos_sums = dict(chosen_cat_pos_sums)
+            if cat_i != 0:
+                trial_pos_sums[cat_i] = trial_pos_sums.get(cat_i, 0) + len(chosen)
+            exp = normalize_dist(
+                _linear_exposure_from_counts(trial_counts, trial_pos_sums, k)
+            )
+            trial_new_count = chosen_new_count + int(pool_is_new[i] == 1)
+            trial_new_pos_sum = chosen_new_pos_sum + (
+                len(chosen) if int(pool_is_new[i]) == 1 else 0
+            )
+            new_exp = float(trial_new_count) - (float(trial_new_pos_sum) / float(k))
         else:
-            tgt = catalog_target(cats)
-        tgt = normalize_dist(tgt)
-        kl = kl_divergence(exp, tgt)
-        l1 = l1_distance(exp, tgt)
+            next_w = float(weights_by_len[k][-1])
+            trial_exp = dict(chosen_exp_by_cat)
+            if cat_i != 0:
+                trial_exp[cat_i] = trial_exp.get(cat_i, 0.0) + next_w
+            exp = normalize_dist(trial_exp)
+            new_exp = chosen_new_exp + (next_w if int(pool_is_new[i]) == 1 else 0.0)
+
+        kl = kl_divergence(exp, target_dist)
+        l1 = l1_distance(exp, target_dist)
         pen = 0.5 * kl + 0.5 * l1
 
         # New item floor
         floor = float(fairness_cfg.get("new_item_floor", 0.0))
         if floor > 0.0:
-            is_new = [
-                int(pool_is_new[pool.index(nid)]) if nid in pool else 0
-                for nid in ranked_ids
-            ]
-            new_exp = float(
-                sum(wi for wi, flag in zip(w.tolist(), is_new) if flag == 1)
-            )
-            total_exp = float(sum(w.tolist()))
+            total_exp = total_exp_by_len[k]
             frac = (new_exp / total_exp) if total_exp > 0 else 0.0
             if frac < floor:
                 pen += (floor - frac) * 2.0
@@ -197,10 +231,7 @@ def greedy_rerank(
             )
 
             if fairness_cfg.get("enabled", False) and chosen:
-                trial = chosen + [nid]
-                val -= float(
-                    fairness_cfg.get("penalty_weight", 0.5)
-                ) * fairness_penalty(trial)
+                val -= float(fairness_cfg.get("penalty_weight", 0.5)) * fairness_penalty(i)
 
             if val > best_val:
                 best_val = val
@@ -215,7 +246,21 @@ def greedy_rerank(
         m = news_meta.get(best, NewsMeta(0, 0, set()))
         if m.cat_idx != 0:
             chosen_cats.add(m.cat_idx)
+            chosen_cat_counts[m.cat_idx] += 1
+            chosen_cat_pos_sums[m.cat_idx] = chosen_cat_pos_sums.get(m.cat_idx, 0) + (
+                len(chosen) - 1
+            )
         chosen_ents |= m.ent
+        if pos_mode == "linear":
+            if int(pool_is_new[pool_index[best]]) == 1:
+                chosen_new_count += 1
+                chosen_new_pos_sum += len(chosen) - 1
+        else:
+            pos_w = float(weights_by_len[len(chosen)][-1])
+            if m.cat_idx != 0:
+                chosen_exp_by_cat[m.cat_idx] = chosen_exp_by_cat.get(m.cat_idx, 0.0) + pos_w
+            if int(pool_is_new[pool_index[best]]) == 1:
+                chosen_new_exp += pos_w
 
     return {
         "ranked_news_id": chosen,

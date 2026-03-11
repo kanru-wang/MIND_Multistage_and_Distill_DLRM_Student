@@ -25,6 +25,9 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
 - **Diversity**: intra-list diversity (ILD), category/entity coverage@K, entropy@K
 - **Exposure fairness**: position-weighted exposure, disparity vs target distribution (KL / L1 / Gini), new-item exposure floor
 
+Fairness target note:
+- In the current reranker/evaluation code, `fairness.category_target: "catalog"` means the category distribution of the impression candidate pool (the candidates available for that user/impression), not the selected top-K list and not the global corpus-wide catalog.
+
 #### Re-ranking (important implementation note)
 - In this project, re-ranking is a **deterministic optimization layer** on top of ranker scores.
 - It is controlled by hyperparameters/constraints (relevance, novelty, coverage, fairness).
