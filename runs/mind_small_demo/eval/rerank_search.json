@@ -1,0 +1,370 @@
+{
+  "k_out": 10,
+  "pool_size": 50,
+  "position_bias": "log",
+  "baseline": {
+    "ndcg@k": 0.3392728948851388,
+    "recall@k": 0.5947597779794453,
+    "ild": 0.9348778839420346,
+    "category_coverage": 5.749808617672791,
+    "category_entropy": 1.5755318132769365,
+    "fairness_kl": 0.04697993121490756,
+    "fairness_gini": 0.3023959432287015,
+    "new_item_exposure_frac": 0.4983437892805552
+  },
+  "product_constraint": {
+    "max_ndcg_drop_pct": 1.0,
+    "min_new_item_exposure_gain": 0.015,
+    "min_category_coverage_gain": 0.3,
+    "max_fairness_kl_increase": 0.002,
+    "baseline_ndcg@k": 0.3392728948851388,
+    "baseline_new_item_exposure_frac": 0.4983437892805552,
+    "baseline_category_coverage": 5.749808617672791,
+    "baseline_fairness_kl": 0.04697993121490756
+  },
+  "search_sample_size": 500,
+  "search_seed": 13,
+  "n_candidates_screened": 36,
+  "n_candidates_evaluated_full": 1,
+  "n_feasible": 1,
+  "best_feasible": {
+    "ndcg@k": 0.33641766488902974,
+    "recall@k": 0.5917799077117882,
+    "ild": 0.9370898700890807,
+    "category_coverage": 6.126107283464567,
+    "category_entropy": 1.6409136694591175,
+    "fairness_kl": 0.04792033268593355,
+    "fairness_gini": 0.3070803234360893,
+    "new_item_exposure_frac": 0.5228753496937627,
+    "weights": {
+      "relevance": 0.8999999999999999,
+      "novelty": 0.05,
+      "coverage": 0.05
+    },
+    "fairness": {
+      "penalty_weight": 0.5,
+      "new_item_floor": 0.2,
+      "category_target": "catalog"
+    },
+    "novelty_sim": "teacher_cosine",
+    "constraint": {
+      "feasible": true,
+      "ndcg_drop_pct": 0.8415732701180518,
+      "new_item_exposure_gain": 0.024531560413207476,
+      "category_coverage_gain": 0.37629866579177573,
+      "fairness_kl_delta": 0.0009404014710259895
+    }
+  },
+  "top_10": [
+    {
+      "ndcg@k": 0.33641766488902974,
+      "recall@k": 0.5917799077117882,
+      "ild": 0.9370898700890807,
+      "category_coverage": 6.126107283464567,
+      "category_entropy": 1.6409136694591175,
+      "fairness_kl": 0.04792033268593355,
+      "fairness_gini": 0.3070803234360893,
+      "new_item_exposure_frac": 0.5228753496937627,
+      "weights": {
+        "relevance": 0.8999999999999999,
+        "novelty": 0.05,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.5,
+        "new_item_floor": 0.2,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.8415732701180518,
+        "new_item_exposure_gain": 0.024531560413207476,
+        "category_coverage_gain": 0.37629866579177573,
+        "fairness_kl_delta": 0.0009404014710259895
+      }
+    }
+  ],
+  "top_10_sample": [
+    {
+      "ndcg@k": 0.3410247407430816,
+      "recall@k": 0.590252380952381,
+      "ild": 0.9356775487672615,
+      "category_coverage": 6.108,
+      "category_entropy": 1.6383436955213546,
+      "fairness_kl": 0.04733545589983623,
+      "fairness_gini": 0.3093484000861645,
+      "new_item_exposure_frac": 0.5278794678915726,
+      "weights": {
+        "relevance": 0.8999999999999999,
+        "novelty": 0.05,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.5,
+        "new_item_floor": 0.2,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.45291533792292454,
+        "new_item_exposure_gain": 0.02572457112125559,
+        "category_coverage_gain": 0.3719999999999999,
+        "fairness_kl_delta": 0.0009059850458777441
+      }
+    },
+    {
+      "ndcg@k": 0.3408158552797221,
+      "recall@k": 0.590252380952381,
+      "ild": 0.9354802450737671,
+      "category_coverage": 6.108,
+      "category_entropy": 1.6381343964338302,
+      "fairness_kl": 0.0470997918678597,
+      "fairness_gini": 0.3094291320443153,
+      "new_item_exposure_frac": 0.5232101734424108,
+      "weights": {
+        "relevance": 0.8999999999999999,
+        "novelty": 0.05,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.5,
+        "new_item_floor": 0.15,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.513890206961508,
+        "new_item_exposure_gain": 0.021055276672093837,
+        "category_coverage_gain": 0.3719999999999999,
+        "fairness_kl_delta": 0.000670321013901215
+      }
+    },
+    {
+      "ndcg@k": 0.34049886345260827,
+      "recall@k": 0.5867523809523809,
+      "ild": 0.9353208097315755,
+      "category_coverage": 6.052,
+      "category_entropy": 1.626439369559288,
+      "fairness_kl": 0.04781700528002634,
+      "fairness_gini": 0.31514676253497603,
+      "new_item_exposure_frac": 0.5342635865409793,
+      "weights": {
+        "relevance": 0.8999999999999999,
+        "novelty": 0.05,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.75,
+        "new_item_floor": 0.2,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.6064219458087434,
+        "new_item_exposure_gain": 0.03210868977066228,
+        "category_coverage_gain": 0.31599999999999984,
+        "fairness_kl_delta": 0.0013875344260678504
+      }
+    },
+    {
+      "ndcg@k": 0.3404291689656936,
+      "recall@k": 0.5860857142857143,
+      "ild": 0.9351529130229261,
+      "category_coverage": 6.05,
+      "category_entropy": 1.6253866678476334,
+      "fairness_kl": 0.04773833937678321,
+      "fairness_gini": 0.31531623217463495,
+      "new_item_exposure_frac": 0.5291686281510313,
+      "weights": {
+        "relevance": 0.8999999999999999,
+        "novelty": 0.05,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.75,
+        "new_item_floor": 0.15,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.6267661676803258,
+        "new_item_exposure_gain": 0.02701373138071428,
+        "category_coverage_gain": 0.31400000000000006,
+        "fairness_kl_delta": 0.0013088685228247257
+      }
+    },
+    {
+      "ndcg@k": 0.34020883877987523,
+      "recall@k": 0.5850857142857143,
+      "ild": 0.9361883226421688,
+      "category_coverage": 6.096,
+      "category_entropy": 1.634368640780449,
+      "fairness_kl": 0.04787913166730617,
+      "fairness_gini": 0.31427130511403084,
+      "new_item_exposure_frac": 0.529403965949396,
+      "weights": {
+        "relevance": 0.85,
+        "novelty": 0.1,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.75,
+        "new_item_floor": 0.15,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.6910818170771373,
+        "new_item_exposure_gain": 0.02724906917907899,
+        "category_coverage_gain": 0.3600000000000003,
+        "fairness_kl_delta": 0.0014496608133476793
+      }
+    },
+    {
+      "ndcg@k": 0.3396547393029072,
+      "recall@k": 0.5875857142857143,
+      "ild": 0.9365918943406277,
+      "category_coverage": 6.144,
+      "category_entropy": 1.6448986788988114,
+      "fairness_kl": 0.04748436843519208,
+      "fairness_gini": 0.30849305975437163,
+      "new_item_exposure_frac": 0.5281001386131432,
+      "weights": {
+        "relevance": 0.85,
+        "novelty": 0.1,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.5,
+        "new_item_floor": 0.2,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.8528266436394611,
+        "new_item_exposure_gain": 0.025945241842826205,
+        "category_coverage_gain": 0.40800000000000036,
+        "fairness_kl_delta": 0.001054897581233595
+      }
+    },
+    {
+      "ndcg@k": 0.3395715621401299,
+      "recall@k": 0.5850857142857143,
+      "ild": 0.9363927700212472,
+      "category_coverage": 6.1,
+      "category_entropy": 1.6356986008882524,
+      "fairness_kl": 0.04809342520482991,
+      "fairness_gini": 0.3139748587757349,
+      "new_item_exposure_frac": 0.5346514889437326,
+      "weights": {
+        "relevance": 0.85,
+        "novelty": 0.1,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.75,
+        "new_item_floor": 0.2,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.8771065361976945,
+        "new_item_exposure_gain": 0.032496592173415606,
+        "category_coverage_gain": 0.3639999999999999,
+        "fairness_kl_delta": 0.0016639543508714244
+      }
+    },
+    {
+      "ndcg@k": 0.33924579600246935,
+      "recall@k": 0.5869190476190477,
+      "ild": 0.9365423007127687,
+      "category_coverage": 6.144,
+      "category_entropy": 1.644757339835167,
+      "fairness_kl": 0.04730869771965518,
+      "fairness_gini": 0.3082940618991852,
+      "new_item_exposure_frac": 0.523181541049399,
+      "weights": {
+        "relevance": 0.85,
+        "novelty": 0.1,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.5,
+        "new_item_floor": 0.15,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.9721995467959028,
+        "new_item_exposure_gain": 0.021026644279081963,
+        "category_coverage_gain": 0.40800000000000036,
+        "fairness_kl_delta": 0.0008792268656966917
+      }
+    },
+    {
+      "ndcg@k": 0.3392320566886012,
+      "recall@k": 0.5796190476190477,
+      "ild": 0.9368106801741921,
+      "category_coverage": 6.642,
+      "category_entropy": 1.7346677460670472,
+      "fairness_kl": 0.04670491836158306,
+      "fairness_gini": 0.29103875410556795,
+      "new_item_exposure_frac": 0.5206391177997071,
+      "weights": {
+        "relevance": 0.85,
+        "novelty": 0.05,
+        "coverage": 0.1
+      },
+      "fairness": {
+        "penalty_weight": 0.25,
+        "new_item_floor": 0.2,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": true,
+        "ndcg_drop_pct": 0.9762101315935131,
+        "new_item_exposure_gain": 0.01848422102939007,
+        "category_coverage_gain": 0.9060000000000006,
+        "fairness_kl_delta": 0.00027544750762457243
+      }
+    },
+    {
+      "ndcg@k": 0.3432940323266614,
+      "recall@k": 0.5912523809523809,
+      "ild": 0.9358085440092875,
+      "category_coverage": 6.156,
+      "category_entropy": 1.648860269665718,
+      "fairness_kl": 0.045984129318363445,
+      "fairness_gini": 0.30335122799873354,
+      "new_item_exposure_frac": 0.5153589516172833,
+      "weights": {
+        "relevance": 0.8999999999999999,
+        "novelty": 0.05,
+        "coverage": 0.05
+      },
+      "fairness": {
+        "penalty_weight": 0.25,
+        "new_item_floor": 0.2,
+        "category_target": "catalog"
+      },
+      "novelty_sim": "teacher_cosine",
+      "constraint": {
+        "feasible": false,
+        "ndcg_drop_pct": 0.0,
+        "new_item_exposure_gain": 0.013204054846966296,
+        "category_coverage_gain": 0.41999999999999993,
+        "fairness_kl_delta": -0.0004453415355950424
+      }
+    }
+  ]
+}

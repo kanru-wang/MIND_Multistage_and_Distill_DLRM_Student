@@ -56,8 +56,8 @@ rerank:
   k_out: 10
   pool_size: 50
   position_bias: "log"  # log|linear
-  relevance_weight: 0.85
-  novelty_weight: 0.10
+  relevance_weight: 0.90
+  novelty_weight: 0.05
   coverage_weight: 0.05
   novelty_sim: "teacher_cosine"  # teacher_cosine|entity_jaccard|category
   coverage:
@@ -68,7 +68,7 @@ rerank:
     enabled: true
     category_target: "catalog"  # catalog|uniform
     provider_target: "catalog"
-    new_item_floor: 0.15  # minimum fraction of exposure in top-k to new items
+    new_item_floor: 0.20  # minimum fraction of exposure in top-k to new items
     penalty_weight: 0.5
 
 eval:

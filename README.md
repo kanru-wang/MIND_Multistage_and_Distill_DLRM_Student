@@ -122,6 +122,27 @@ python -m mindrec.cli evaluate --config configs/mind_small.yaml
 python -m mindrec.cli rerank_eval --config configs/mind_small.yaml
 ```
 
+### 3.5 Search reranker hyperparameters under a product constraint
+```bash
+python -m mindrec.cli rerank_search --config configs/mind_small.yaml
+```
+
+The current reranker defaults in `configs/mind_small.yaml` were selected with a pragmatic product constraint on dev:
+- `nDCG@10` drop must be at most `1.0%` vs the relevance-only top-10 baseline.
+- `new_item_exposure_frac` must improve by at least `+0.015`.
+- `category_coverage@10` must improve by at least `+0.30`.
+- `fairness_kl` may worsen by at most `+0.002`.
+
+The current selected setting is:
+- `relevance_weight=0.90`
+- `novelty_weight=0.05`
+- `coverage_weight=0.05`
+- `novelty_sim=teacher_cosine`
+- `fairness.penalty_weight=0.5`
+- `fairness.new_item_floor=0.20`
+
+The search writes its summary to `runs/<run_name>/eval/rerank_search.json`.
+
 Artifacts go to `runs/<run_name>/`.
 
 ---

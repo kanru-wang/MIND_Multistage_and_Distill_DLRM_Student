@@ -8,6 +8,7 @@ from mindrec.pipeline.evaluate import run_evaluate
 from mindrec.pipeline.preprocess import run_preprocess
 from mindrec.pipeline.ranker_train import run_train_ranker
 from mindrec.pipeline.rerank_eval import run_rerank_eval
+from mindrec.pipeline.rerank_search import run_rerank_search
 from mindrec.pipeline.retrieval import run_build_index, run_eval_retrieval
 from mindrec.pipeline.teacher_train import run_train_teacher
 
@@ -51,6 +52,11 @@ def main() -> None:
     )
     _add_config_arg(p)
 
+    p = sub.add_parser(
+        "rerank_search", help="Search reranker hyperparameters under product constraints"
+    )
+    _add_config_arg(p)
+
     args = parser.parse_args()
     cfg = load_config(args.config)
 
@@ -74,6 +80,9 @@ def main() -> None:
         return
     if args.cmd == "rerank_eval":
         run_rerank_eval(cfg)
+        return
+    if args.cmd == "rerank_search":
+        run_rerank_search(cfg)
         return
 
     raise RuntimeError(f"Unknown command: {args.cmd}")
