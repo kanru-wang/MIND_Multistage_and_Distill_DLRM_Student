@@ -60,6 +60,17 @@ def _new_item_exposure_frac(
     return float(new_exp / (float(weights.sum()) + 1e-12))
 
 
+def _category_target_dist(
+    category_target: str, reference_cats: list[int]
+) -> dict[int, float]:
+    tgt = (
+        uniform_target(reference_cats)
+        if category_target == "uniform"
+        else catalog_target(reference_cats)
+    )
+    return normalize_dist(tgt)
+
+
 def _resolve_device(cfg: dict[str, Any]) -> torch.device:
     device_str = cfg["ranker"].get("device", "cuda")
     if device_str == "cuda" and not torch.cuda.is_available():
@@ -148,6 +159,7 @@ def _evaluate_baseline(
     teacher_item: np.ndarray,
     news_meta: dict[str, Any],
     k_out: int,
+    pool_size: int,
     position_bias: str,
     category_target: str,
 ) -> dict[str, float]:
@@ -156,15 +168,22 @@ def _evaluate_baseline(
     base_ild = []
     base_cov = []
     base_ent = []
-    base_fair_kl = []
+    base_fair_kl_full = []
+    base_fair_kl_pool = []
     base_fair_gini = []
     base_new_exp = []
     w = position_bias_weights(k_out, mode=position_bias)
 
     for row in scored_impressions:
         base_order = np.argsort(-row.scores)[:k_out]
+        pool_order = np.argsort(-row.scores)[:pool_size]
         base_ids = [row.cand_news_id[i] for i in base_order.tolist()]
-        cand_cat_ref = _category_reference(row.cand_news_id, news_meta)
+        cand_cat_ref_full = _category_reference(row.cand_news_id, news_meta)
+        cand_cat_ref_pool = [
+            _cat_idx(news_meta, row.cand_news_id[i])
+            for i in pool_order.tolist()
+            if _cat_idx(news_meta, row.cand_news_id[i]) != 0
+        ]
         base_cats = [_cat_idx(news_meta, nid) for nid in base_ids]
 
         base_ndcg.append(ndcg_at_k(row.labels, row.scores, k_out))
@@ -177,13 +196,10 @@ def _evaluate_baseline(
         base_ild.append(ild_from_similarity(cosine_sim_matrix(base_emb)))
 
         exp = normalize_dist(exposure_from_ranking(base_cats, w))
-        tgt = (
-            uniform_target(cand_cat_ref)
-            if category_target == "uniform"
-            else catalog_target(cand_cat_ref)
-        )
-        tgt = normalize_dist(tgt)
-        base_fair_kl.append(kl_divergence(exp, tgt))
+        tgt_full = _category_target_dist(category_target, cand_cat_ref_full)
+        tgt_pool = _category_target_dist(category_target, cand_cat_ref_pool)
+        base_fair_kl_full.append(kl_divergence(exp, tgt_full))
+        base_fair_kl_pool.append(kl_divergence(exp, tgt_pool))
         base_fair_gini.append(gini(list(exp.values())))
 
         base_new_exp.append(
@@ -196,7 +212,12 @@ def _evaluate_baseline(
         "ild": float(np.mean(base_ild) if base_ild else 0.0),
         "category_coverage": float(np.mean(base_cov) if base_cov else 0.0),
         "category_entropy": float(np.mean(base_ent) if base_ent else 0.0),
-        "fairness_kl": float(np.mean(base_fair_kl) if base_fair_kl else 0.0),
+        "fairness_kl_full": float(
+            np.mean(base_fair_kl_full) if base_fair_kl_full else 0.0
+        ),
+        "fairness_kl_pool": float(
+            np.mean(base_fair_kl_pool) if base_fair_kl_pool else 0.0
+        ),
         "fairness_gini": float(np.mean(base_fair_gini) if base_fair_gini else 0.0),
         "new_item_exposure_frac": float(np.mean(base_new_exp) if base_new_exp else 0.0),
     }
@@ -221,7 +242,8 @@ def _evaluate_candidate(
     rr_ild = []
     rr_cov = []
     rr_ent = []
-    rr_fair_kl = []
+    rr_fair_kl_full = []
+    rr_fair_kl_pool = []
     rr_fair_gini = []
     rr_new_exp = []
     w = position_bias_weights(k_out, mode=position_bias)
@@ -229,7 +251,12 @@ def _evaluate_candidate(
     for row in scored_impressions:
         pool_order = np.argsort(-row.scores)[:pool_size]
         pool_emb = teacher_item[row.cand_news_idx[pool_order]]
-        cand_cat_ref = _category_reference(row.cand_news_id, news_meta)
+        cand_cat_ref_full = _category_reference(row.cand_news_id, news_meta)
+        cand_cat_ref_pool = [
+            _cat_idx(news_meta, row.cand_news_id[i])
+            for i in pool_order.tolist()
+            if _cat_idx(news_meta, row.cand_news_id[i]) != 0
+        ]
         rr = greedy_rerank(
             cand_news_id=row.cand_news_id,
             cand_scores=row.scores,
@@ -261,13 +288,14 @@ def _evaluate_candidate(
         rr_ild.append(ild_from_similarity(cosine_sim_matrix(rr_emb)))
 
         exp = normalize_dist(exposure_from_ranking(rr_cats, w))
-        tgt = (
-            uniform_target(cand_cat_ref)
-            if fairness_cfg.get("category_target", "catalog") == "uniform"
-            else catalog_target(cand_cat_ref)
+        tgt_full = _category_target_dist(
+            fairness_cfg.get("category_target", "catalog"), cand_cat_ref_full
         )
-        tgt = normalize_dist(tgt)
-        rr_fair_kl.append(kl_divergence(exp, tgt))
+        tgt_pool = _category_target_dist(
+            fairness_cfg.get("category_target", "catalog"), cand_cat_ref_pool
+        )
+        rr_fair_kl_full.append(kl_divergence(exp, tgt_full))
+        rr_fair_kl_pool.append(kl_divergence(exp, tgt_pool))
         rr_fair_gini.append(gini(list(exp.values())))
 
         rr_new_exp.append(_new_item_exposure_frac(w, rr_idx, row.cand_is_new))
@@ -278,7 +306,12 @@ def _evaluate_candidate(
         "ild": float(np.mean(rr_ild) if rr_ild else 0.0),
         "category_coverage": float(np.mean(rr_cov) if rr_cov else 0.0),
         "category_entropy": float(np.mean(rr_ent) if rr_ent else 0.0),
-        "fairness_kl": float(np.mean(rr_fair_kl) if rr_fair_kl else 0.0),
+        "fairness_kl_full": float(
+            np.mean(rr_fair_kl_full) if rr_fair_kl_full else 0.0
+        ),
+        "fairness_kl_pool": float(
+            np.mean(rr_fair_kl_pool) if rr_fair_kl_pool else 0.0
+        ),
         "fairness_gini": float(np.mean(rr_fair_gini) if rr_fair_gini else 0.0),
         "new_item_exposure_frac": float(np.mean(rr_new_exp) if rr_new_exp else 0.0),
     }
@@ -301,11 +334,12 @@ def _make_constraint(baseline: dict[str, float]) -> dict[str, float]:
         "max_ndcg_drop_pct": 1.0,
         "min_new_item_exposure_gain": 0.015,
         "min_category_coverage_gain": 0.30,
-        "max_fairness_kl_increase": 0.002,
+        "max_fairness_kl_pool_increase": 0.002,
         "baseline_ndcg@k": baseline["ndcg@k"],
         "baseline_new_item_exposure_frac": baseline["new_item_exposure_frac"],
         "baseline_category_coverage": baseline["category_coverage"],
-        "baseline_fairness_kl": baseline["fairness_kl"],
+        "baseline_fairness_kl_pool": baseline["fairness_kl_pool"],
+        "baseline_fairness_kl_full": baseline["fairness_kl_full"],
     }
 
 
@@ -317,19 +351,21 @@ def _constraint_check(
     )
     new_gain = metrics["new_item_exposure_frac"] - baseline["new_item_exposure_frac"]
     cov_gain = metrics["category_coverage"] - baseline["category_coverage"]
-    fair_kl_delta = metrics["fairness_kl"] - baseline["fairness_kl"]
+    fair_kl_pool_delta = metrics["fairness_kl_pool"] - baseline["fairness_kl_pool"]
+    fair_kl_full_delta = metrics["fairness_kl_full"] - baseline["fairness_kl_full"]
     feasible = (
         ndcg_drop_pct <= constraint["max_ndcg_drop_pct"]
         and new_gain >= constraint["min_new_item_exposure_gain"]
         and cov_gain >= constraint["min_category_coverage_gain"]
-        and fair_kl_delta <= constraint["max_fairness_kl_increase"]
+        and fair_kl_pool_delta <= constraint["max_fairness_kl_pool_increase"]
     )
     return {
         "feasible": feasible,
         "ndcg_drop_pct": float(ndcg_drop_pct),
         "new_item_exposure_gain": float(new_gain),
         "category_coverage_gain": float(cov_gain),
-        "fairness_kl_delta": float(fair_kl_delta),
+        "fairness_kl_pool_delta": float(fair_kl_pool_delta),
+        "fairness_kl_full_delta": float(fair_kl_full_delta),
     }
 
 
@@ -358,6 +394,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
         teacher_item=teacher_item,
         news_meta=news_meta,
         k_out=k_out,
+        pool_size=pool_size,
         position_bias=position_bias,
         category_target=fairness_base.get("category_target", "catalog"),
     )
@@ -384,6 +421,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
         teacher_item=teacher_item,
         news_meta=news_meta,
         k_out=k_out,
+        pool_size=pool_size,
         position_bias=position_bias,
         category_target=fairness_base.get("category_target", "catalog"),
     )
@@ -444,7 +482,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             r["ndcg@k"],
             r["new_item_exposure_frac"],
             r["category_coverage"],
-            -r["fairness_kl"],
+            -r["fairness_kl_pool"],
         ),
         reverse=True,
     )
@@ -496,7 +534,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             r["ndcg@k"],
             r["new_item_exposure_frac"],
             r["category_coverage"],
-            -r["fairness_kl"],
+            -r["fairness_kl_pool"],
         ),
         reverse=True,
     )
@@ -506,7 +544,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             r["ndcg@k"],
             r["new_item_exposure_frac"],
             r["category_coverage"],
-            -r["fairness_kl"],
+            -r["fairness_kl_pool"],
         ),
         reverse=True,
     )

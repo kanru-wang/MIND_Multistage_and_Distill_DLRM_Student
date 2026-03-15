@@ -45,6 +45,17 @@ def _new_item_exposure_frac(
     return float(new_exp / (float(weights.sum()) + 1e-12))
 
 
+def _category_target_dist(
+    category_target: str, reference_cats: list[int]
+) -> dict[int, float]:
+    tgt = (
+        uniform_target(reference_cats)
+        if category_target == "uniform"
+        else catalog_target(reference_cats)
+    )
+    return normalize_dist(tgt)
+
+
 def run_rerank_eval(cfg: dict[str, Any]) -> None:
     ds = cfg["data"]["dataset_name"]
     proc_root = Path(cfg["data"]["processed_root"]) / ds
@@ -86,8 +97,10 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
     rr_cat_cov = []
     base_ent = []
     rr_ent = []
-    base_fair_kl = []
-    rr_fair_kl = []
+    base_fair_kl_full = []
+    rr_fair_kl_full = []
+    base_fair_kl_pool = []
+    rr_fair_kl_pool = []
     base_fair_gini = []
     rr_fair_gini = []
     base_new_exp = []
@@ -105,7 +118,7 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             cand_subcat_idx = np.array(r["cand_subcat_idx"], dtype=np.int64)
             cand_is_new = list(r["cand_is_new_item"])
             cand_clicks_log1p = np.array(r["cand_item_clicks_log1p"], dtype=np.float32)
-            cand_cat_ref = [int(c) for c in cand_cat_idx.tolist() if int(c) != 0]
+            cand_cat_ref_full = [int(c) for c in cand_cat_idx.tolist() if int(c) != 0]
             hlen = float(r["history_len"])
             dense = np.stack(
                 [np.full_like(cand_clicks_log1p, hlen), cand_clicks_log1p], axis=1
@@ -170,13 +183,18 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             # Exposure fairness (categories)
             w = position_bias_weights(k_out, mode=pos_mode)
             exp = normalize_dist(exposure_from_ranking(base_cats, w))
-            tgt = (
-                uniform_target(cand_cat_ref)
-                if fairness_cfg.get("category_target", "catalog") == "uniform"
-                else catalog_target(cand_cat_ref)
+            pool_order = np.argsort(-scores)[:pool_size]
+            cand_cat_ref_pool = [
+                int(cand_cat_idx[i]) for i in pool_order.tolist() if int(cand_cat_idx[i]) != 0
+            ]
+            tgt_full = _category_target_dist(
+                fairness_cfg.get("category_target", "catalog"), cand_cat_ref_full
             )
-            tgt = normalize_dist(tgt)
-            base_fair_kl.append(kl_divergence(exp, tgt))
+            tgt_pool = _category_target_dist(
+                fairness_cfg.get("category_target", "catalog"), cand_cat_ref_pool
+            )
+            base_fair_kl_full.append(kl_divergence(exp, tgt_full))
+            base_fair_kl_pool.append(kl_divergence(exp, tgt_pool))
             base_fair_gini.append(gini(list(exp.values())))
 
             base_new_exp.append(
@@ -184,7 +202,6 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             )
 
             # Re-rank
-            pool_order = np.argsort(-scores)[:pool_size]
             pool_emb = teacher_item[cand_news_idx[pool_order]]
             rr = greedy_rerank(
                 cand_news_id=cand_news_id,
@@ -216,13 +233,8 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             rr_ild.append(ild_from_similarity(cosine_sim_matrix(rr_emb)))
 
             exp2 = normalize_dist(exposure_from_ranking(rr_cats, w))
-            tgt2 = (
-                uniform_target(cand_cat_ref)
-                if fairness_cfg.get("category_target", "catalog") == "uniform"
-                else catalog_target(cand_cat_ref)
-            )
-            tgt2 = normalize_dist(tgt2)
-            rr_fair_kl.append(kl_divergence(exp2, tgt2))
+            rr_fair_kl_full.append(kl_divergence(exp2, tgt_full))
+            rr_fair_kl_pool.append(kl_divergence(exp2, tgt_pool))
             rr_fair_gini.append(gini(list(exp2.values())))
 
             rr_new_exp.append(_new_item_exposure_frac(w, rr_idx, cand_is_new))
@@ -236,7 +248,12 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             "ild": float(np.mean(base_ild) if base_ild else 0.0),
             "category_coverage": float(np.mean(base_cat_cov) if base_cat_cov else 0.0),
             "category_entropy": float(np.mean(base_ent) if base_ent else 0.0),
-            "fairness_kl": float(np.mean(base_fair_kl) if base_fair_kl else 0.0),
+            "fairness_kl_full": float(
+                np.mean(base_fair_kl_full) if base_fair_kl_full else 0.0
+            ),
+            "fairness_kl_pool": float(
+                np.mean(base_fair_kl_pool) if base_fair_kl_pool else 0.0
+            ),
             "fairness_gini": float(np.mean(base_fair_gini) if base_fair_gini else 0.0),
             "new_item_exposure_frac": float(
                 np.mean(base_new_exp) if base_new_exp else 0.0
@@ -248,7 +265,12 @@ def run_rerank_eval(cfg: dict[str, Any]) -> None:
             "ild": float(np.mean(rr_ild) if rr_ild else 0.0),
             "category_coverage": float(np.mean(rr_cat_cov) if rr_cat_cov else 0.0),
             "category_entropy": float(np.mean(rr_ent) if rr_ent else 0.0),
-            "fairness_kl": float(np.mean(rr_fair_kl) if rr_fair_kl else 0.0),
+            "fairness_kl_full": float(
+                np.mean(rr_fair_kl_full) if rr_fair_kl_full else 0.0
+            ),
+            "fairness_kl_pool": float(
+                np.mean(rr_fair_kl_pool) if rr_fair_kl_pool else 0.0
+            ),
             "fairness_gini": float(np.mean(rr_fair_gini) if rr_fair_gini else 0.0),
             "new_item_exposure_frac": float(np.mean(rr_new_exp) if rr_new_exp else 0.0),
         },

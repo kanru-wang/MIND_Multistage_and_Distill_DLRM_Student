@@ -27,6 +27,10 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
 
 Fairness target note:
 - In the current reranker/evaluation code, `fairness.category_target: "catalog"` means the category distribution of the impression candidate pool (the candidates available for that user/impression), not the selected top-K list and not the global corpus-wide catalog.
+- `rerank_eval` and `rerank_search` now report both `fairness_kl_pool` and `fairness_kl_full`.
+- `fairness_kl_pool` compares top-K exposure against the reranker's top-`pool_size` candidate mix.
+- `fairness_kl_full` compares top-K exposure against the full impression candidate set.
+- Product constraints in reranker search use `fairness_kl_pool`, because that matches the reranker's actual optimization target.
 
 #### Re-ranking (important implementation note)
 - In this project, re-ranking is a **deterministic optimization layer** on top of ranker scores.
@@ -136,7 +140,7 @@ The current reranker defaults in `configs/mind_small.yaml` were selected with a 
 - `nDCG@10` drop must be at most `1.0%` vs the relevance-only top-10 baseline.
 - `new_item_exposure_frac` must improve by at least `+0.015`.
 - `category_coverage@10` must improve by at least `+0.30`.
-- `fairness_kl` may worsen by at most `+0.002`.
+- `fairness_kl_pool` may worsen by at most `+0.002`.
 
 The current selected setting is:
 - `relevance_weight=0.90`
