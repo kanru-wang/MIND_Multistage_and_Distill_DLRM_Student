@@ -74,6 +74,12 @@ rerank:
     provider_target: "catalog"
     new_item_floor: 0.20  # minimum fraction of exposure in top-k to new items
     penalty_weight: 0.5
+  search:
+    absolute_guardrails:
+      min_ndcg@k: 0.335
+      min_new_item_exposure_frac: 0.520
+      min_category_coverage: 6.0
+      max_fairness_kl_pool: 0.048
 
 eval:
   ks: [5, 10]

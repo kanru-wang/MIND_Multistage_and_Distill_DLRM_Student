@@ -136,11 +136,31 @@ python -m mindrec.cli rerank_eval --config configs/mind_small.yaml
 python -m mindrec.cli rerank_search --config configs/mind_small.yaml
 ```
 
-The current reranker defaults in `configs/mind_small.yaml` were selected with a pragmatic product constraint on dev:
-- `nDCG@10` drop must be at most `1.0%` vs the relevance-only top-10 baseline.
-- `new_item_exposure_frac` must improve by at least `+0.015`.
-- `category_coverage@10` must improve by at least `+0.30`.
-- `fairness_kl_pool` may worsen by at most `+0.002`.
+The current reranker search reports three views of the tradeoff surface on dev:
+- `best_feasible`: maximize `nDCG@10` subject to absolute guardrails
+- `best_scalar_utility`: maximize a normalized scalar utility
+- `pareto_frontier`: nondominated settings across ranking/diversity/fairness axes
+
+The current absolute guardrails are:
+- `nDCG@10` must be at least `0.335`.
+- `new_item_exposure_frac` must be at least `0.520`.
+- `category_coverage@10` must be at least `6.0`.
+- `fairness_kl_pool` must be at most `0.048`.
+
+Each candidate in `rerank_search.json` now reports:
+- `constraint.feasible`
+
+The scalar utility is computed from absolute-guardrail-normalized units:
+- `ndcg_vs_floor_units = nDCG@10 / min_ndcg@k`
+- `new_item_exposure_vs_floor_units = new_item_exposure_frac / min_new_item_exposure_frac`
+- `category_coverage_vs_floor_units = category_coverage / min_category_coverage`
+- `fairness_kl_pool_vs_ceiling_units = (max_fairness_kl_pool - fairness_kl_pool) / max_fairness_kl_pool`
+
+with coefficients:
+- `4.0 * ndcg_vs_floor_units`
+- `1.5 * new_item_exposure_vs_floor_units`
+- `1.0 * category_coverage_vs_floor_units`
+- `0.75 * fairness_kl_pool_vs_ceiling_units`
 
 The current selected setting is:
 - `relevance_weight=0.90`

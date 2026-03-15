@@ -329,23 +329,37 @@ def _evaluate_candidate(
     return metrics
 
 
-def _make_constraint(baseline: dict[str, float]) -> dict[str, float]:
+def _make_constraint(
+    baseline: dict[str, float], search_cfg: dict[str, Any]
+) -> dict[str, Any]:
+    absolute_cfg = dict(search_cfg.get("absolute_guardrails", {}))
     return {
-        "max_ndcg_drop_pct": 1.0,
-        "min_new_item_exposure_gain": 0.015,
-        "min_category_coverage_gain": 0.30,
-        "max_fairness_kl_pool_increase": 0.002,
-        "baseline_ndcg@k": baseline["ndcg@k"],
-        "baseline_new_item_exposure_frac": baseline["new_item_exposure_frac"],
-        "baseline_category_coverage": baseline["category_coverage"],
-        "baseline_fairness_kl_pool": baseline["fairness_kl_pool"],
-        "baseline_fairness_kl_full": baseline["fairness_kl_full"],
+        "absolute_guardrails": {
+            "min_ndcg@k": float(absolute_cfg.get("min_ndcg@k", 0.0)),
+            "min_new_item_exposure_frac": float(
+                absolute_cfg.get("min_new_item_exposure_frac", 0.0)
+            ),
+            "min_category_coverage": float(
+                absolute_cfg.get("min_category_coverage", 0.0)
+            ),
+            "max_fairness_kl_pool": float(
+                absolute_cfg.get("max_fairness_kl_pool", float("inf"))
+            ),
+        },
+        "baseline_metrics": {
+            "ndcg@k": baseline["ndcg@k"],
+            "new_item_exposure_frac": baseline["new_item_exposure_frac"],
+            "category_coverage": baseline["category_coverage"],
+            "fairness_kl_pool": baseline["fairness_kl_pool"],
+            "fairness_kl_full": baseline["fairness_kl_full"],
+        },
     }
 
 
 def _constraint_check(
     baseline: dict[str, float], metrics: dict[str, Any], constraint: dict[str, float]
 ) -> dict[str, Any]:
+    absolute = constraint["absolute_guardrails"]
     ndcg_drop_pct = 100.0 * max(
         0.0, (baseline["ndcg@k"] - metrics["ndcg@k"]) / max(baseline["ndcg@k"], 1e-12)
     )
@@ -354,19 +368,164 @@ def _constraint_check(
     fair_kl_pool_delta = metrics["fairness_kl_pool"] - baseline["fairness_kl_pool"]
     fair_kl_full_delta = metrics["fairness_kl_full"] - baseline["fairness_kl_full"]
     feasible = (
-        ndcg_drop_pct <= constraint["max_ndcg_drop_pct"]
-        and new_gain >= constraint["min_new_item_exposure_gain"]
-        and cov_gain >= constraint["min_category_coverage_gain"]
-        and fair_kl_pool_delta <= constraint["max_fairness_kl_pool_increase"]
+        metrics["ndcg@k"] >= absolute["min_ndcg@k"]
+        and metrics["new_item_exposure_frac"] >= absolute["min_new_item_exposure_frac"]
+        and metrics["category_coverage"] >= absolute["min_category_coverage"]
+        and metrics["fairness_kl_pool"] <= absolute["max_fairness_kl_pool"]
     )
     return {
-        "feasible": feasible,
+        "feasible": bool(feasible),
         "ndcg_drop_pct": float(ndcg_drop_pct),
         "new_item_exposure_gain": float(new_gain),
         "category_coverage_gain": float(cov_gain),
         "fairness_kl_pool_delta": float(fair_kl_pool_delta),
         "fairness_kl_full_delta": float(fair_kl_full_delta),
+        "absolute_metrics": {
+            "ndcg@k": float(metrics["ndcg@k"]),
+            "new_item_exposure_frac": float(metrics["new_item_exposure_frac"]),
+            "category_coverage": float(metrics["category_coverage"]),
+            "fairness_kl_pool": float(metrics["fairness_kl_pool"]),
+        },
     }
+
+
+def _candidate_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        item["novelty_sim"],
+        item["weights"]["relevance"],
+        item["weights"]["novelty"],
+        item["weights"]["coverage"],
+        item["fairness"]["penalty_weight"],
+        item["fairness"]["new_item_floor"],
+    )
+
+
+def _attach_objective_views(
+    baseline: dict[str, float],
+    metrics: dict[str, Any],
+    constraint: dict[str, float],
+) -> dict[str, Any]:
+    metrics = dict(metrics)
+    metrics["constraint"] = _constraint_check(baseline, metrics, constraint)
+
+    ndcg_delta_ratio = (metrics["ndcg@k"] - baseline["ndcg@k"]) / max(
+        baseline["ndcg@k"], 1e-12
+    )
+    new_gain = (
+        metrics["new_item_exposure_frac"] - baseline["new_item_exposure_frac"]
+    )
+    cov_gain = metrics["category_coverage"] - baseline["category_coverage"]
+    fair_pool_delta = metrics["fairness_kl_pool"] - baseline["fairness_kl_pool"]
+    absolute = constraint["absolute_guardrails"]
+
+    utility_terms = {
+        # Normalize each term by the absolute guardrail scale.
+        "ndcg_vs_floor_units": float(
+            metrics["ndcg@k"] / max(absolute["min_ndcg@k"], 1e-12)
+        ),
+        "new_item_exposure_vs_floor_units": float(
+            metrics["new_item_exposure_frac"]
+            / max(absolute["min_new_item_exposure_frac"], 1e-12)
+        ),
+        "category_coverage_vs_floor_units": float(
+            metrics["category_coverage"] / max(absolute["min_category_coverage"], 1e-12)
+        ),
+        "fairness_kl_pool_vs_ceiling_units": float(
+            (absolute["max_fairness_kl_pool"] - metrics["fairness_kl_pool"])
+            / max(absolute["max_fairness_kl_pool"], 1e-12)
+        ),
+    }
+    utility_coefficients = {
+        "ndcg_vs_floor_units": 4.0,
+        "new_item_exposure_vs_floor_units": 1.5,
+        "category_coverage_vs_floor_units": 1.0,
+        "fairness_kl_pool_vs_ceiling_units": 0.75,
+    }
+    scalar_utility = sum(
+        utility_coefficients[name] * utility_terms[name]
+        for name in utility_coefficients
+    )
+
+    metrics["objective_view"] = {
+        "deltas_vs_baseline": {
+            "ndcg@k_ratio": float(ndcg_delta_ratio),
+            "new_item_exposure_gain": float(new_gain),
+            "category_coverage_gain": float(cov_gain),
+            "fairness_kl_pool_delta": float(fair_pool_delta),
+            "fairness_kl_full_delta": float(
+                metrics["fairness_kl_full"] - baseline["fairness_kl_full"]
+            ),
+        },
+        "scalar_utility": {
+            "score": float(scalar_utility),
+            "coefficients": utility_coefficients,
+            "normalized_terms": utility_terms,
+        },
+    }
+    return metrics
+
+
+def _sort_feasible_first(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        results,
+        key=lambda r: (
+            int(r["constraint"]["feasible"]),
+            r["ndcg@k"],
+            r["new_item_exposure_frac"],
+            r["category_coverage"],
+            -r["fairness_kl_pool"],
+        ),
+        reverse=True,
+    )
+
+
+def _sort_by_scalar_utility(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        results,
+        key=lambda r: (
+            r["objective_view"]["scalar_utility"]["score"],
+            r["ndcg@k"],
+            r["new_item_exposure_frac"],
+            r["category_coverage"],
+            -r["fairness_kl_pool"],
+        ),
+        reverse=True,
+    )
+
+
+def _dominates(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    not_worse = (
+        a["ndcg@k"] >= b["ndcg@k"]
+        and a["new_item_exposure_frac"] >= b["new_item_exposure_frac"]
+        and a["category_coverage"] >= b["category_coverage"]
+        and a["fairness_kl_pool"] <= b["fairness_kl_pool"]
+    )
+    strictly_better = (
+        a["ndcg@k"] > b["ndcg@k"]
+        or a["new_item_exposure_frac"] > b["new_item_exposure_frac"]
+        or a["category_coverage"] > b["category_coverage"]
+        or a["fairness_kl_pool"] < b["fairness_kl_pool"]
+    )
+    return not_worse and strictly_better
+
+
+def _pareto_frontier(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    frontier = []
+    for candidate in results:
+        if any(_dominates(other, candidate) for other in results if other is not candidate):
+            continue
+        frontier.append(candidate)
+    return sorted(
+        frontier,
+        key=lambda r: (
+            r["ndcg@k"],
+            r["objective_view"]["scalar_utility"]["score"],
+            r["new_item_exposure_frac"],
+            r["category_coverage"],
+            -r["fairness_kl_pool"],
+        ),
+        reverse=True,
+    )
 
 
 def run_rerank_search(cfg: dict[str, Any]) -> None:
@@ -387,6 +546,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
     position_bias = rr_cfg.get("position_bias", "log")
     coverage_cfg = dict(rr_cfg.get("coverage", {}))
     fairness_base = dict(rr_cfg.get("fairness", {}))
+    search_cfg = dict(rr_cfg.get("search", {}))
     fairness_base["position_bias"] = position_bias
 
     baseline = _evaluate_baseline(
@@ -398,7 +558,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
         position_bias=position_bias,
         category_target=fairness_base.get("category_target", "catalog"),
     )
-    constraint = _make_constraint(baseline)
+    constraint = _make_constraint(baseline, search_cfg)
     seed = 13
     search_sample_size = 500
     if len(scored_impressions) > search_sample_size:
@@ -473,38 +633,29 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             coverage_weight=coverage_weight,
             novelty_sim=novelty_sim,
         )
-        metrics["constraint"] = _constraint_check(sample_baseline, metrics, constraint)
-        sample_results.append(metrics)
+        sample_results.append(
+            _attach_objective_views(sample_baseline, metrics, constraint)
+        )
 
-    sample_results.sort(
-        key=lambda r: (
-            int(r["constraint"]["feasible"]),
-            r["ndcg@k"],
-            r["new_item_exposure_frac"],
-            r["category_coverage"],
-            -r["fairness_kl_pool"],
-        ),
-        reverse=True,
-    )
+    sample_results = _sort_feasible_first(sample_results)
+    sample_results_by_utility = _sort_by_scalar_utility(sample_results)
+    sample_pareto = _pareto_frontier(sample_results)
 
     shortlist_size = 10
     shortlist = []
     seen = set()
-    for item in sample_results:
-        key = (
-            item["novelty_sim"],
-            item["weights"]["relevance"],
-            item["weights"]["novelty"],
-            item["weights"]["coverage"],
-            item["fairness"]["penalty_weight"],
-            item["fairness"]["new_item_floor"],
-        )
-        if key in seen:
-            continue
-        shortlist.append(item)
-        seen.add(key)
-        if len(shortlist) >= shortlist_size:
-            break
+    shortlist_sources = (
+        sample_results[:shortlist_size],
+        sample_results_by_utility[:shortlist_size],
+        sample_pareto,
+    )
+    for source in shortlist_sources:
+        for item in source:
+            key = _candidate_key(item)
+            if key in seen:
+                continue
+            shortlist.append(item)
+            seen.add(key)
 
     results = []
     for item in tqdm(shortlist, desc="Evaluate shortlist on full dev"):
@@ -525,29 +676,13 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             coverage_weight=item["weights"]["coverage"],
             novelty_sim=item["novelty_sim"],
         )
-        metrics["constraint"] = _constraint_check(baseline, metrics, constraint)
-        results.append(metrics)
+        results.append(_attach_objective_views(baseline, metrics, constraint))
 
     feasible = [r for r in results if r["constraint"]["feasible"]]
-    feasible.sort(
-        key=lambda r: (
-            r["ndcg@k"],
-            r["new_item_exposure_frac"],
-            r["category_coverage"],
-            -r["fairness_kl_pool"],
-        ),
-        reverse=True,
-    )
-    results.sort(
-        key=lambda r: (
-            int(r["constraint"]["feasible"]),
-            r["ndcg@k"],
-            r["new_item_exposure_frac"],
-            r["category_coverage"],
-            -r["fairness_kl_pool"],
-        ),
-        reverse=True,
-    )
+    feasible = _sort_feasible_first(feasible)
+    results = _sort_feasible_first(results)
+    results_by_utility = _sort_by_scalar_utility(results)
+    pareto_frontier = _pareto_frontier(results)
 
     out = {
         "k_out": k_out,
@@ -559,11 +694,17 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
         "search_seed": seed,
         "n_candidates_screened": len(sample_results),
         "n_candidates_evaluated_full": len(results),
+        "n_shortlisted_full_eval": len(shortlist),
         "n_feasible": len(feasible),
         "best_feasible": feasible[0] if feasible else None,
-        # top_10_sample: Best hyperparameter settings ranked on the sampled search subset used for cheap screening before full evaluation.
-        # top_10:Best hyperparameter settings after reevaluating the shortlisted candidates on the full dev set.
+        "best_scalar_utility": results_by_utility[0] if results_by_utility else None,
+        "pareto_frontier": pareto_frontier,
+        "pareto_frontier_sample": sample_pareto,
+        # top_10_sample: Best settings on the sampled search subset under the feasibility-first ranking.
+        # top_10: Best settings after reevaluating the shortlisted candidates on the full dev set.
         "top_10": results[:10],
         "top_10_sample": sample_results[:10],
+        "top_10_scalar_utility": results_by_utility[:10],
+        "top_10_scalar_utility_sample": sample_results_by_utility[:10],
     }
     save_json(out_root / "rerank_search.json", out)
