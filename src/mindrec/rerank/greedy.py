@@ -10,8 +10,6 @@ import numpy as np
 from mindrec.metrics.diversity import jaccard
 from mindrec.metrics.fairness import (
     catalog_target,
-    kl_divergence,
-    l1_distance,
     normalize_dist,
     uniform_target,
 )
@@ -63,15 +61,33 @@ def cosine_sim_matrix(x: np.ndarray) -> np.ndarray:
     return x @ x.T
 
 
-def _linear_exposure_from_counts(
-    counts: dict[int, int], pos_sums: dict[int, int], k: int
-) -> dict[int, float]:
-    if k <= 0:
-        return {}
-    return {
-        gid: float(count) - (float(pos_sums.get(gid, 0)) / float(k))
-        for gid, count in counts.items()
-    }
+def _build_novelty_similarity(
+    novelty_sim: str,
+    pool: list[str],
+    news_meta: dict[str, NewsMeta],
+    item_teacher_emb: np.ndarray,
+) -> np.ndarray | None:
+    if novelty_sim == "teacher_cosine":
+        x = item_teacher_emb.astype(np.float32)
+        x = x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)
+        return cosine_sim_matrix(x)
+    if novelty_sim == "category":
+        cats = np.array(
+            [news_meta.get(nid, NewsMeta(0, 0, set())).cat_idx for nid in pool],
+            dtype=np.int64,
+        )
+        return (cats[:, None] == cats[None, :]).astype(np.float32)
+    if novelty_sim == "entity_jaccard":
+        n = len(pool)
+        sim = np.eye(n, dtype=np.float32)
+        ents = [news_meta.get(nid, NewsMeta(0, 0, set())).ent for nid in pool]
+        for i in range(n):
+            for j in range(i + 1, n):
+                score = float(jaccard(ents[i], ents[j]))
+                sim[i, j] = score
+                sim[j, i] = score
+        return sim
+    raise ValueError(f"Unknown novelty_sim: {novelty_sim}")
 
 
 def greedy_rerank(
@@ -96,26 +112,19 @@ def greedy_rerank(
     pool_scores = cand_scores[order]
     pool_is_new = [int(cand_is_new[i]) for i in order]
     pool_cats = [news_meta.get(nid, NewsMeta(0, 0, set())).cat_idx for nid in pool]
-
-    # Precompute similarity for novelty
-    sim_mat = None
-    if novelty_sim == "teacher_cosine":
-        # In this repo, we store teacher embeddings by news_idx. So we also expect caller to pass emb vectors for pool directly.
-        # Here we'll accept item_teacher_emb already as [pool_size,D] embeddings.
-        x = item_teacher_emb.astype(np.float32)
-        # Normalize just in case
-        x = x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)
-        sim_mat = cosine_sim_matrix(x)
-    elif novelty_sim in ["entity_jaccard", "category"]:
-        sim_mat = None
-    else:
-        raise ValueError(f"Unknown novelty_sim: {novelty_sim}")
+    sim_mat = _build_novelty_similarity(
+        novelty_sim=novelty_sim,
+        pool=pool,
+        news_meta=news_meta,
+        item_teacher_emb=item_teacher_emb,
+    )
 
     chosen = []
     chosen_idx = []
     chosen_set = set()
     chosen_cats = set()
     chosen_ents = set()
+    max_sim_to_chosen = np.zeros(len(pool), dtype=np.float32)
     chosen_exp_by_cat: dict[int, float] = {}
     chosen_cat_counts: Counter[int] = Counter()
     chosen_cat_pos_sums: dict[int, int] = {}
@@ -138,31 +147,12 @@ def greedy_rerank(
         target_dist = normalize_dist(uniform_target([c for c in pool_cats if c != 0]))
     else:
         target_dist = normalize_dist(catalog_target([c for c in pool_cats if c != 0]))
+    target_keys = list(target_dist.keys())
 
     def novelty(i: int) -> float:
         if not chosen_idx:
             return 0.0
-        if novelty_sim == "teacher_cosine" and sim_mat is not None:
-            sims = [float(sim_mat[i, j]) for j in chosen_idx]
-            return -max(sims)
-        if novelty_sim == "category":
-            ci = news_meta.get(pool[i], NewsMeta(0, 0, set())).cat_idx
-            sims = [
-                (
-                    1.0
-                    if ci == news_meta.get(pool[j], NewsMeta(0, 0, set())).cat_idx
-                    else 0.0
-                )
-                for j in chosen_idx
-            ]
-            return -max(sims)
-        # entity_jaccard
-        ei = news_meta.get(pool[i], NewsMeta(0, 0, set())).ent
-        sims = [
-            jaccard(ei, news_meta.get(pool[j], NewsMeta(0, 0, set())).ent)
-            for j in chosen_idx
-        ]
-        return -max(sims)
+        return -float(max_sim_to_chosen[i])
 
     def coverage(i: int) -> float:
         m = news_meta.get(pool[i], NewsMeta(0, 0, set()))
@@ -174,46 +164,67 @@ def greedy_rerank(
             bonus += ent_bonus * float(min(len(new_ents), max_new_ent))
         return bonus
 
+    def fairness_penalty_log(cat_i: int, is_new_i: int, k: int) -> float:
+        next_w = float(weights_by_len[k][-1])
+        total_exp = total_exp_by_len[k]
+        kl = 0.0
+        l1 = 0.0
+        for gid in target_keys:
+            raw_exp = chosen_exp_by_cat.get(gid, 0.0)
+            if gid == cat_i and gid != 0:
+                raw_exp += next_w
+            pk = (raw_exp / total_exp) if total_exp > 0 else 0.0
+            qk = float(target_dist.get(gid, 0.0))
+            if pk > 0.0:
+                kl += pk * np.log((pk + 1e-12) / (qk + 1e-12))
+            l1 += abs(pk - qk)
+
+        pen = 0.5 * float(kl) + 0.5 * float(l1)
+        floor = float(fairness_cfg.get("new_item_floor", 0.0))
+        if floor > 0.0:
+            new_exp = chosen_new_exp + (next_w if is_new_i == 1 else 0.0)
+            frac = (new_exp / total_exp) if total_exp > 0 else 0.0
+            if frac < floor:
+                pen += (floor - frac) * 2.0
+        return pen
+
+    def fairness_penalty_linear(cat_i: int, is_new_i: int, k: int) -> float:
+        total_exp = total_exp_by_len[k]
+        kl = 0.0
+        l1 = 0.0
+        for gid in target_keys:
+            count = chosen_cat_counts.get(gid, 0)
+            pos_sum = chosen_cat_pos_sums.get(gid, 0)
+            if gid == cat_i and gid != 0:
+                count += 1
+                pos_sum += len(chosen)
+            raw_exp = float(count) - (float(pos_sum) / float(k))
+            pk = (raw_exp / total_exp) if total_exp > 0 else 0.0
+            qk = float(target_dist.get(gid, 0.0))
+            if pk > 0.0:
+                kl += pk * np.log((pk + 1e-12) / (qk + 1e-12))
+            l1 += abs(pk - qk)
+
+        pen = 0.5 * float(kl) + 0.5 * float(l1)
+        floor = float(fairness_cfg.get("new_item_floor", 0.0))
+        if floor > 0.0:
+            new_count = chosen_new_count + int(is_new_i == 1)
+            new_pos_sum = chosen_new_pos_sum + (len(chosen) if is_new_i == 1 else 0)
+            new_exp = float(new_count) - (float(new_pos_sum) / float(k))
+            frac = (new_exp / total_exp) if total_exp > 0 else 0.0
+            if frac < floor:
+                pen += (floor - frac) * 2.0
+        return pen
+
     def fairness_penalty(i: int) -> float:
         if not fairness_cfg.get("enabled", False):
             return 0.0
         k = len(chosen) + 1
         cat_i = pool_cats[i]
+        is_new_i = int(pool_is_new[i])
         if pos_mode == "linear":
-            trial_counts = dict(chosen_cat_counts)
-            if cat_i != 0:
-                trial_counts[cat_i] = trial_counts.get(cat_i, 0) + 1
-            trial_pos_sums = dict(chosen_cat_pos_sums)
-            if cat_i != 0:
-                trial_pos_sums[cat_i] = trial_pos_sums.get(cat_i, 0) + len(chosen)
-            exp = normalize_dist(
-                _linear_exposure_from_counts(trial_counts, trial_pos_sums, k)
-            )
-            trial_new_count = chosen_new_count + int(pool_is_new[i] == 1)
-            trial_new_pos_sum = chosen_new_pos_sum + (
-                len(chosen) if int(pool_is_new[i]) == 1 else 0
-            )
-            new_exp = float(trial_new_count) - (float(trial_new_pos_sum) / float(k))
-        else:
-            next_w = float(weights_by_len[k][-1])
-            trial_exp = dict(chosen_exp_by_cat)
-            if cat_i != 0:
-                trial_exp[cat_i] = trial_exp.get(cat_i, 0.0) + next_w
-            exp = normalize_dist(trial_exp)
-            new_exp = chosen_new_exp + (next_w if int(pool_is_new[i]) == 1 else 0.0)
-
-        kl = kl_divergence(exp, target_dist)
-        l1 = l1_distance(exp, target_dist)
-        pen = 0.5 * kl + 0.5 * l1
-
-        # New item floor
-        floor = float(fairness_cfg.get("new_item_floor", 0.0))
-        if floor > 0.0:
-            total_exp = total_exp_by_len[k]
-            frac = (new_exp / total_exp) if total_exp > 0 else 0.0
-            if frac < floor:
-                pen += (floor - frac) * 2.0
-        return float(pen)
+            return float(fairness_penalty_linear(cat_i, is_new_i, k))
+        return float(fairness_penalty_log(cat_i, is_new_i, k))
 
     # Greedy selection
     for _ in range(min(k_out, len(pool))):
@@ -243,6 +254,8 @@ def greedy_rerank(
         chosen.append(best)
         chosen_idx.append(int(best_i))
         chosen_set.add(best)
+        if sim_mat is not None and best_i is not None:
+            max_sim_to_chosen = np.maximum(max_sim_to_chosen, sim_mat[:, int(best_i)])
         m = news_meta.get(best, NewsMeta(0, 0, set()))
         if m.cat_idx != 0:
             chosen_cats.add(m.cat_idx)
