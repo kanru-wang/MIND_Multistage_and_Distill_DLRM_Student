@@ -34,6 +34,32 @@ class ImpressionScores:
     scores: np.ndarray
 
 
+def _cat_idx(news_meta: dict[str, Any], news_id: str) -> int:
+    meta = news_meta.get(news_id)
+    return int(meta.cat_idx) if meta is not None else 0
+
+
+def _category_reference(
+    cand_news_id: list[str], news_meta: dict[str, Any]
+) -> list[int]:
+    return [
+        cat_idx
+        for cat_idx in (_cat_idx(news_meta, nid) for nid in cand_news_id)
+        if cat_idx != 0
+    ]
+
+
+def _new_item_exposure_frac(
+    weights: np.ndarray, ranking_idx: list[int], cand_is_new: list[int]
+) -> float:
+    new_exp = sum(
+        float(weight)
+        for weight, idx in zip(weights.tolist(), ranking_idx)
+        if int(cand_is_new[idx]) == 1
+    )
+    return float(new_exp / (float(weights.sum()) + 1e-12))
+
+
 def _resolve_device(cfg: dict[str, Any]) -> torch.device:
     device_str = cfg["ranker"].get("device", "cuda")
     if device_str == "cuda" and not torch.cuda.is_available():
@@ -138,14 +164,8 @@ def _evaluate_baseline(
     for row in scored_impressions:
         base_order = np.argsort(-row.scores)[:k_out]
         base_ids = [row.cand_news_id[i] for i in base_order.tolist()]
-        cand_cat_ref = [
-            news_meta.get(nid).cat_idx
-            for nid in row.cand_news_id
-            if nid in news_meta and news_meta.get(nid).cat_idx != 0
-        ]
-        base_cats = [
-            news_meta.get(nid).cat_idx if nid in news_meta else 0 for nid in base_ids
-        ]
+        cand_cat_ref = _category_reference(row.cand_news_id, news_meta)
+        base_cats = [_cat_idx(news_meta, nid) for nid in base_ids]
 
         base_ndcg.append(ndcg_at_k(row.labels, row.scores, k_out))
         base_recall.append(recall_at_k(row.labels, row.scores, k_out))
@@ -166,12 +186,9 @@ def _evaluate_baseline(
         base_fair_kl.append(kl_divergence(exp, tgt))
         base_fair_gini.append(gini(list(exp.values())))
 
-        new_exp = sum(
-            float(wi)
-            for wi, idx in zip(w.tolist(), base_order.tolist())
-            if int(row.cand_is_new[idx]) == 1
+        base_new_exp.append(
+            _new_item_exposure_frac(w, base_order.tolist(), row.cand_is_new)
         )
-        base_new_exp.append(float(new_exp / (float(sum(w.tolist())) + 1e-12)))
 
     return {
         "ndcg@k": float(np.mean(base_ndcg) if base_ndcg else 0.0),
@@ -212,11 +229,7 @@ def _evaluate_candidate(
     for row in scored_impressions:
         pool_order = np.argsort(-row.scores)[:pool_size]
         pool_emb = teacher_item[row.cand_news_idx[pool_order]]
-        cand_cat_ref = [
-            news_meta.get(nid).cat_idx
-            for nid in row.cand_news_id
-            if nid in news_meta and news_meta.get(nid).cat_idx != 0
-        ]
+        cand_cat_ref = _category_reference(row.cand_news_id, news_meta)
         rr = greedy_rerank(
             cand_news_id=row.cand_news_id,
             cand_scores=row.scores,
@@ -234,8 +247,9 @@ def _evaluate_candidate(
         )
 
         rr_ids = rr["ranked_news_id"]
-        rr_idx = [row.cand_news_id.index(nid) for nid in rr_ids]
-        rr_cats = [news_meta.get(nid).cat_idx if nid in news_meta else 0 for nid in rr_ids]
+        cand_idx_by_id = {nid: idx for idx, nid in enumerate(row.cand_news_id)}
+        rr_idx = [cand_idx_by_id[nid] for nid in rr_ids]
+        rr_cats = [_cat_idx(news_meta, nid) for nid in rr_ids]
 
         rr_ndcg.append(ndcg_from_order(row.labels, np.array(rr_idx), k_out))
         rr_recall.append(recall_from_order(row.labels, np.array(rr_idx), k_out))
@@ -256,12 +270,7 @@ def _evaluate_candidate(
         rr_fair_kl.append(kl_divergence(exp, tgt))
         rr_fair_gini.append(gini(list(exp.values())))
 
-        new_exp = sum(
-            float(wi)
-            for wi, idx in zip(w.tolist(), rr_idx)
-            if int(row.cand_is_new[idx]) == 1
-        )
-        rr_new_exp.append(float(new_exp / (float(sum(w.tolist())) + 1e-12)))
+        rr_new_exp.append(_new_item_exposure_frac(w, rr_idx, row.cand_is_new))
 
     metrics = {
         "ndcg@k": float(np.mean(rr_ndcg) if rr_ndcg else 0.0),
