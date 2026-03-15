@@ -449,6 +449,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
         reverse=True,
     )
 
+    shortlist_size = 10
     shortlist = []
     seen = set()
     for item in sample_results:
@@ -464,7 +465,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             continue
         shortlist.append(item)
         seen.add(key)
-        if len(shortlist) >= 1:
+        if len(shortlist) >= shortlist_size:
             break
 
     results = []

@@ -230,7 +230,7 @@ def greedy_rerank(
                 + coverage_weight * coverage(i)
             )
 
-            if fairness_cfg.get("enabled", False) and chosen:
+            if fairness_cfg.get("enabled", False):
                 val -= float(fairness_cfg.get("penalty_weight", 0.5)) * fairness_penalty(i)
 
             if val > best_val:
