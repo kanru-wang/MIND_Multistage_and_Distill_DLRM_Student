@@ -51,6 +51,10 @@ ranker:
     lambda_repr: 0.1
     cold_weight: 2.0
     warm_weight: 0.3
+  calibration:
+    enabled: true
+    lr: 0.05
+    max_iter: 100
 
 rerank:
   k_out: 10

@@ -18,8 +18,9 @@ from mindrec.metrics.ranking import (
     ndcg_at_k,
     recall_at_k,
 )
+from mindrec.models.calibration import TemperatureScaler
 from mindrec.models.dlrm import DLRMStudent
-from mindrec.utils import position_bias_weights, save_json
+from mindrec.utils import save_json
 
 
 def _load_model(
@@ -69,6 +70,8 @@ def run_evaluate(cfg: dict[str, Any]) -> None:
     device = torch.device(device_str)
 
     model, teacher_user, teacher_item = _load_model(cfg, proc_root, runs_root, device)
+    calib_path = runs_root / "ranker" / "calibration.json"
+    scaler = TemperatureScaler.load(calib_path) if calib_path.exists() else None
 
     impr = pd.read_parquet(proc_root / "dev_impressions.parquet")
     ks = [int(k) for k in cfg["eval"]["ks"]]
@@ -79,6 +82,7 @@ def run_evaluate(cfg: dict[str, Any]) -> None:
     agg.update({f"map@{k}": [] for k in ks})
     agg["mrr"] = []
     agg["auc"] = []
+    all_scores = []
     all_probs = []
     all_labels = []
 
@@ -144,8 +148,10 @@ def run_evaluate(cfg: dict[str, Any]) -> None:
                 )
                 logits.append(logit.detach().cpu().numpy())
             scores = np.concatenate(logits, axis=0)
-            probs = 1.0 / (1.0 + np.exp(-scores))
+            probs_raw = 1.0 / (1.0 + np.exp(-scores))
+            probs = scaler.predict_proba(scores) if scaler is not None else probs_raw
 
+            all_scores.extend(scores.tolist())
             all_probs.extend(probs.tolist())
             all_labels.extend(labels.astype(float).tolist())
 
@@ -176,11 +182,17 @@ def run_evaluate(cfg: dict[str, Any]) -> None:
                         )
 
     y = np.array(all_labels, dtype=np.float32)
+    s = np.array(all_scores, dtype=np.float32)
+    p_raw = 1.0 / (1.0 + np.exp(-s))
     p = np.array(all_probs, dtype=np.float32)
 
     out = {
         "ranking": {k: float(np.mean(v) if v else 0.0) for k, v in agg.items()},
         "calibration": {
+            "method": "temperature" if scaler is not None else "sigmoid",
+            "temperature": float(scaler.temperature) if scaler is not None else 1.0,
+            "raw_brier": brier_score(y, p_raw),
+            "raw_ece_15": expected_calibration_error(y, p_raw, n_bins=15),
             "brier": brier_score(y, p),
             "ece_15": expected_calibration_error(y, p, n_bins=15),
         },

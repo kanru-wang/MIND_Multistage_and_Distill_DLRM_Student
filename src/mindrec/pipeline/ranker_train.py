@@ -14,6 +14,7 @@ from tqdm import tqdm
 from mindrec.config import ensure_dir
 from mindrec.data.datasets import PairDataset, collate_batch
 from mindrec.data.featurize import IdMaps
+from mindrec.models.calibration import fit_temperature_scaler
 from mindrec.models.dlrm import DLRMStudent
 from mindrec.models.distill import pairwise_logit_distill_bce, repr_distill_mse
 from mindrec.utils import set_seed, save_json, to_device
@@ -211,3 +212,46 @@ def run_train_ranker(cfg: dict[str, Any]) -> None:
             )
 
     save_json(art_root / "train_summary.json", {"best_dev_auc": best_auc})
+
+    cal_cfg = dict(cfg["ranker"].get("calibration", {}))
+    if bool(cal_cfg.get("enabled", True)):
+        ckpt = torch.load(art_root / "best.pt", map_location=device)
+        model.load_state_dict(ckpt["model"])
+        model.eval()
+
+        logits_all = []
+        labels_all = []
+        with torch.no_grad():
+            for batch in tqdm(dev_loader, desc="Fit temperature"):
+                batch = to_device(batch, device)
+                ui = batch["user_idx"].cpu().numpy()
+                ni = batch["news_idx"].cpu().numpy()
+                tu = torch.tensor(teacher_user[ui], dtype=torch.float32, device=device)
+                ti = torch.tensor(teacher_item[ni], dtype=torch.float32, device=device)
+                logits, _ = model(
+                    user_idx=batch["user_idx"],
+                    news_idx=batch["news_idx"],
+                    cat_idx=batch["cat_idx"],
+                    subcat_idx=batch["subcat_idx"],
+                    dense=batch["dense"],
+                    teacher_user_emb=tu,
+                    teacher_item_emb=ti,
+                    return_repr=False,
+                )
+                logits_all.append(logits.detach().cpu().numpy())
+                labels_all.append(batch["label"].detach().cpu().numpy())
+
+        scaler, stats = fit_temperature_scaler(
+            logits=np.concatenate(logits_all, axis=0),
+            labels=np.concatenate(labels_all, axis=0),
+            max_iter=int(cal_cfg.get("max_iter", 100)),
+            lr=float(cal_cfg.get("lr", 0.05)),
+        )
+        scaler.save(
+            art_root / "calibration.json",
+            meta={
+                "fit_split": "dev_pairs",
+                "stats": stats,
+            },
+        )
+        save_json(art_root / "calibration_stats.json", stats)

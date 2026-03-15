@@ -119,6 +119,8 @@ python -m mindrec.cli eval_retrieval --config configs/mind_small.yaml
 python -m mindrec.cli train_ranker --config configs/mind_small.yaml
 ```
 
+`train_ranker` also fits a post-hoc temperature scaler on held-out `dev_pairs` and saves it to `runs/<run_name>/ranker/calibration.json`. It tunes a single positive scalar `T` in `sigmoid(logit / T)` against held-out labels, improving probability calibration without changing ranking order.
+
 ### 3.4 Evaluate ranker + reranker (metrics + slices)
 ```bash
 python -m mindrec.cli evaluate --config configs/mind_small.yaml
