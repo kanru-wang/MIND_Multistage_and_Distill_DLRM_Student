@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from dataclasses import dataclass
@@ -16,6 +17,11 @@ from mindrec.metrics.fairness import (
 from mindrec.utils import position_bias_weights
 
 
+def _stable_entity_id(name: str) -> int:
+    digest = hashlib.blake2b(name.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, byteorder="big", signed=False)
+
+
 def _parse_entities(s: str) -> set[int]:
     # MIND entities are JSON-like; keep robust.
     if not isinstance(s, str) or not s.strip():
@@ -30,7 +36,7 @@ def _parse_entities(s: str) -> set[int]:
             if isinstance(e, dict):
                 name = str(e.get("Label") or e.get("WikidataId") or e.get("Type") or "")
                 if name:
-                    out.add(abs(hash(name)) % (2**31 - 1))
+                    out.add(_stable_entity_id(name))
     return out
 
 
