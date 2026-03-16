@@ -29,3 +29,15 @@ Target definition note:
 - `uniform` target means equal mass across the categories present in that impression candidate pool.
 - The target is not derived from the selected top-K list, and `catalog` here is not a global full-corpus category prior.
 - When both `fairness_kl_pool` and `fairness_kl_full` are reported, the first uses the reranker's accessible pool as reference and the second uses the broader full candidate set as reference.
+
+## Notes
+- `p` is the actual position-weighted exposure distribution of the selected top-K list across groups such as categories.
+- `q` is the target group distribution used for comparison.
+    - Higher-ranked items contribute more to `p` because position weights decay with rank.
+    - `fairness_kl_pool` compares `p` to the reranker's top-`pool_size` candidate mix.
+    - `fairness_kl_full` compares `p` to the full impression candidate mix.
+    - Lower KL means the observed exposure pattern is closer to the target pattern.
+
+- Novelty is an anti-redundancy score used by the reranker. With `teacher_cosine`, it is `- max similarity(candidate, already_selected_items)`, so lower similarity means higher novelty.
+- Coverage rewards adding new information to the list. In the current code this means bonus for a previously unseen category and bonus for previously unseen entities.
+- New-item exposure fraction is the fraction of total position-weighted exposure assigned to items flagged as new/rare (by train-click-count thresholds).
