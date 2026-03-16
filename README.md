@@ -37,6 +37,67 @@ Fairness target note:
 - It is controlled by hyperparameters/constraints (relevance, novelty, coverage, fairness).
 - **No training loop is required** for this re-ranking stage.
 
+#### Distillation representation note
+- In `DLRMStudent.forward()`, the student representation used for distillation is `rep = [eu, ei, zf]`, where:
+- `eu`: user ID embedding
+- `ei`: news/item ID embedding
+- `zf`: teacher-guided fusion vector from attention over teacher user/item embeddings
+- The dense tower output `xd` and the category/subcategory embeddings `ec`, `es` are intentionally excluded from `rep`.
+- Reason: the teacher representation being matched is `concat(teacher_user_emb, teacher_item_emb)`, which is a semantic user-item representation. `eu`, `ei`, and `zf` are the student parts most closely aligned with that semantic space, while `xd`, `ec`, and `es` do not have a clean one-to-one counterpart in the teacher embedding space.
+
+#### Re-ranking process
+- `greedy_rerank()` takes the top `pool_size` candidates by ranker score, then builds the final top-`k_out` list one item at a time.
+- At each step it scores every remaining candidate with:
+- `relevance_weight * relevance`
+- `+ novelty_weight * novelty`
+- `+ coverage_weight * coverage`
+- `- fairness.penalty_weight * fairness_penalty`
+- It then picks the candidate with the highest total value, adds it to the list, updates the running novelty/coverage/fairness state, and repeats until `k_out` items are selected.
+
+#### Exposure fairness
+- Let `p` be the **actual exposure distribution** of the current ranked list across groups such as categories.
+- Let `q` be the **target distribution** we want to match.
+- In the current code:
+- `p` is built from the selected top-K list after applying position weights.
+- `q` is derived from the reference candidate set:
+  - `fairness_kl_pool`: reference is the reranker's top-`pool_size` candidate mix
+  - `fairness_kl_full`: reference is the full impression candidate mix
+  - If `category_target: uniform`, then `q` is uniform over categories present in the reference set (not used in this project).
+  - If `category_target: catalog`, then `q` is the empirical category distribution of that reference set.
+
+#### Worked examples for novelty, coverage, and fairness
+- Suppose the reranker has already selected two items: `A` and `B`.
+- Candidate `C` has ranker relevance score `0.80`, category `Sports`, entities `{Messi, Inter Miami}`, and is marked as a new item.
+- Candidate `D` has relevance score `0.78`, category `Health`, entities `{WHO, vaccine}`, and is not new.
+
+- **Novelty example with `teacher_cosine`**:
+- If `C` has teacher-embedding cosine similarities `0.90` to `A` and `0.35` to `B`, then `novelty(C) = -max(0.90, 0.35) = -0.90`.
+- If `D` has similarities `0.20` to `A` and `0.10` to `B`, then `novelty(D) = -0.20`.
+- Because `-0.20 > -0.90`, `D` is treated as more novel than `C`.
+
+- **Coverage example**:
+- Suppose the selected list has already covered categories `{Sports, Politics}` and entities `{Messi, Real Madrid}`.
+- If `coverage.category_bonus = 1.0`, `coverage.entity_bonus = 0.3`, and `max_new_entities_per_item = 3`:
+- `C` is in `Sports`, which is already covered, so it gets no category bonus. It adds one new entity, `Inter Miami`, so `coverage(C) = 0.3`.
+- `D` is in `Health`, which is new, so it gets `1.0` category bonus. If both `WHO` and `vaccine` are new, it also gets `2 * 0.3 = 0.6` entity bonus, so `coverage(D) = 1.6`.
+
+- **Exposure fairness example**:
+- Suppose the current top-3 list has categories `[Sports, Sports, Health]`.
+- With log position weights, a typical exposure pattern is roughly `[1.00, 0.63, 0.50]`.
+- Then the actual category exposure map is:
+- `Sports: 1.00 + 0.63 = 1.63`
+- `Health: 0.50`
+- After normalization, this becomes `p`, the actual exposure share by category.
+- If the reference candidate pool category mix is `Sports: 50%`, `Health: 30%`, `Politics: 20%`, that normalized mix is `q`.
+- The fairness penalty compares `p` and `q` using both KL divergence and L1 distance.
+
+- **New-item exposure penalty example**:
+- Suppose `new_item_floor = 0.20`.
+- If only the rank-3 item is new, then new-item exposure is `0.50`.
+- Total exposure is `1.00 + 0.63 + 0.50 = 2.13`.
+- So `new_item_exposure_frac = 0.50 / 2.13 = 0.235`, which is above the floor, so no extra penalty is added.
+- If no selected item is new, then `new_item_exposure_frac = 0.0`, which is below `0.20`, so the fairness penalty is increased.
+
 ---
 
 ## 0) Hardware target
