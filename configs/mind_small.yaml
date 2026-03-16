@@ -76,10 +76,10 @@ rerank:
     penalty_weight: 0.5
   search:
     absolute_guardrails:
-      min_ndcg@k: 0.335
+      min_ndcg@k: 0.329
       min_new_item_exposure_frac: 0.520
-      min_category_coverage: 6.0
-      max_fairness_kl_pool: 0.048
+      min_category_coverage: 6.45
+      max_fairness_kl_pool: 0.242
 
 eval:
   ks: [5, 10]

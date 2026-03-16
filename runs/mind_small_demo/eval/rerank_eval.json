@@ -7,23 +7,25 @@
     "ild": 0.9348778839420346,
     "category_coverage": 5.749808617672791,
     "category_entropy": 1.5755318132769365,
-    "fairness_kl": 0.04697993121490756,
+    "fairness_kl_full": 0.4170268805510605,
+    "fairness_kl_pool": 0.3824492719059465,
     "fairness_gini": 0.3023959432287015,
-    "new_item_exposure_frac": 0.4983437892805552
+    "new_item_exposure_frac": 0.498343772936759
   },
   "reranked": {
-    "ndcg@k": 0.3359261886622063,
-    "recall@k": 0.5907443063183702,
-    "ild": 0.9381956203718441,
-    "category_coverage": 6.165299650043744,
-    "category_entropy": 1.6481370270131637,
-    "fairness_kl": 0.04778567049944287,
-    "fairness_gini": 0.3056248358161014,
-    "new_item_exposure_frac": 0.5188916830647764
+    "ndcg@k": 0.3297011020980092,
+    "recall@k": 0.5868040058085376,
+    "ild": 0.9387691334578504,
+    "category_coverage": 6.511482939632546,
+    "category_entropy": 1.7124922030926408,
+    "fairness_kl_full": 0.2740180579382511,
+    "fairness_kl_pool": 0.24022808780288393,
+    "fairness_gini": 0.29116973237161814,
+    "new_item_exposure_frac": 0.5374551017747518
   },
   "weights": {
-    "relevance": 0.85,
-    "novelty": 0.1,
+    "relevance": 0.9,
+    "novelty": 0.05,
     "coverage": 0.05
   },
   "novelty_sim": "teacher_cosine",
