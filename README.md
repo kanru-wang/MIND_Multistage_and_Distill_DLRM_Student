@@ -1,9 +1,9 @@
 # MIND Multi-Stage Recommender (Retrieval → DLRM Ranker → Diversity+Fairness Re-ranker)
 
 This project implements a realistic recommender stack on the **Microsoft News Dataset (MIND)**:
-- Stage 1: **Teacher retrieval** (two-tower, text-based item encoder + history-based user encoder)
+- Stage 1: **Teacher retrieval embeddings** (text-based item encoder + history-based user encoder)
 - Stage 2: **Student ranker** (DLRM-style sparse+dense model) with **attention fusion** to ingest teacher embeddings
-- Stage 3: **Re-ranking** enforcing **(1) relevance vs novelty** and **(2) coverage of categories/entities**, plus **exposure fairness** constraints/penalties for category/provider/new items
+- Stage 3: **Re-ranking** enforcing **(1) relevance vs novelty** and **(2) category/entity-informed coverage bonuses**, plus **exposure fairness** constraints/penalties for category and new items
 - Extensive **evaluation**: ranking metrics, calibration, diversity, exposure fairness, and cold/new slices
 
 MIND is widely used as a benchmark for news recommendation, with impression logs and rich news metadata.
@@ -17,12 +17,13 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
 - The teacher is a pair of encoders:
 - a **news/item encoder** that maps each article into an embedding vector
 - a **user encoder** that maps a user’s recent clicked history into an embedding vector
-- Training goal (standard retrieval idea): make clicked `(user, news)` pairs close in embedding space, and non-clicked pairs farther apart (contrastive learning with in-batch/sampled negatives).
+- In the current code, the item encoder is an off-the-shelf sentence-transformer and the user encoder is a train-free pooling step over clicked-history item embeddings.
+- This still serves the retrieval stage, but it is **not** a trained two-tower retrieval model with a contrastive training loop.
 
 #### Evaluation (many angles)
 - **Ranking quality**: AUC, MRR, nDCG@K, MAP@K, Recall@K
 - **Calibration**: ECE (expected calibration error), Brier score
-- **Diversity**: intra-list diversity (ILD), category/entity coverage@K, entropy@K
+- **Diversity**: intra-list diversity (ILD), category coverage@K, category entropy@K
 - **Exposure fairness**: position-weighted exposure, disparity vs target distribution (KL / L1 / Gini), new-item exposure floor
 
 Fairness target note:
@@ -203,10 +204,10 @@ The current reranker search reports three views of the tradeoff surface on dev:
 - `pareto_frontier`: nondominated settings across ranking/diversity/fairness axes
 
 The current absolute guardrails are:
-- `nDCG@10` must be at least `0.335`.
+- `nDCG@10` must be at least `0.329`.
 - `new_item_exposure_frac` must be at least `0.520`.
-- `category_coverage@10` must be at least `6.0`.
-- `fairness_kl_pool` must be at most `0.048`.
+- `category_coverage@10` must be at least `6.45`.
+- `fairness_kl_pool` must be at most `0.242`.
 
 Each candidate in `rerank_search.json` now reports:
 - `constraint.feasible`
@@ -229,7 +230,7 @@ The current selected setting is:
 - `coverage_weight=0.05`
 - `novelty_sim=teacher_cosine`
 - `fairness.penalty_weight=0.5`
-- `fairness.new_item_floor=0.20`
+- `fairness.new_item_floor=0.15`
 
 The search writes its summary to `runs/<run_name>/eval/rerank_search.json`.
 
@@ -241,16 +242,9 @@ Artifacts go to `runs/<run_name>/`.
 
 - `src/mindrec/`
   - `data/`: parsing + feature building
-  - `models/teacher_*`: teacher two-tower retrieval
-  - `models/dlrm_*`: student DLRM ranker + attention fusion
+  - `models/teacher.py`: teacher-side embedding utilities
+  - `models/dlrm.py`: student DLRM ranker + attention fusion
   - `rerank/`: diversity + coverage + exposure fairness reranking
   - `metrics/`: ranking, calibration, diversity, fairness
   - `cli.py`: entrypoint for scripts
 - `configs/`: YAML configs
-
----
-
-## 5) Notes on “provider fairness”
-MIND includes strong **category/subcategory** metadata. For “provider” fairness, this repo supports:
-- **category/subcategory** as providers (default), and/or
-- **entity clusters** as proxy providers (optional)

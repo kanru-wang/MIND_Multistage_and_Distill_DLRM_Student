@@ -82,7 +82,13 @@ def _build_novelty_similarity(
             [news_meta.get(nid, NewsMeta(0, 0, set())).cat_idx for nid in pool],
             dtype=np.int64,
         )
-        return (cats[:, None] == cats[None, :]).astype(np.float32)
+        sim = (cats[:, None] == cats[None, :]).astype(np.float32)
+        # Treat unknown category 0 as missing signal rather than a real shared category.
+        unknown_mask = cats == 0
+        sim[unknown_mask, :] = 0.0
+        sim[:, unknown_mask] = 0.0
+        np.fill_diagonal(sim, 1.0)
+        return sim
     if novelty_sim == "entity_jaccard":
         n = len(pool)
         sim = np.eye(n, dtype=np.float32)

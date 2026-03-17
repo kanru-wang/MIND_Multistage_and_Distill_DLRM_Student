@@ -417,6 +417,14 @@ def _attach_objective_views(
     cov_gain = metrics["category_coverage"] - baseline["category_coverage"]
     fair_pool_delta = metrics["fairness_kl_pool"] - baseline["fairness_kl_pool"]
     absolute = constraint["absolute_guardrails"]
+    fairness_ceiling = float(absolute["max_fairness_kl_pool"])
+    if np.isfinite(fairness_ceiling):
+        fairness_kl_pool_vs_ceiling_units = float(
+            (fairness_ceiling - metrics["fairness_kl_pool"])
+            / max(fairness_ceiling, 1e-12)
+        )
+    else:
+        fairness_kl_pool_vs_ceiling_units = 0.0
 
     utility_terms = {
         # Normalize each term by the absolute guardrail scale.
@@ -430,10 +438,7 @@ def _attach_objective_views(
         "category_coverage_vs_floor_units": float(
             metrics["category_coverage"] / max(absolute["min_category_coverage"], 1e-12)
         ),
-        "fairness_kl_pool_vs_ceiling_units": float(
-            (absolute["max_fairness_kl_pool"] - metrics["fairness_kl_pool"])
-            / max(absolute["max_fairness_kl_pool"], 1e-12)
-        ),
+        "fairness_kl_pool_vs_ceiling_units": fairness_kl_pool_vs_ceiling_units,
     }
     utility_coefficients = {
         "ndcg_vs_floor_units": 4.0,

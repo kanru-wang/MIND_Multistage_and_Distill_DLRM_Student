@@ -28,6 +28,25 @@ class HistoryAttentionPool(nn.Module):
         return out.squeeze(1)
 
 
+class TeacherTwoTower(nn.Module):
+    def __init__(self, item_dim: int, hidden_dim: int, heads: int = 4) -> None:
+        super().__init__()
+        self.item_proj = nn.Sequential(
+            nn.Linear(item_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.user_pool = HistoryAttentionPool(dim=hidden_dim, heads=heads)
+
+    def encode_items(self, item_emb: torch.Tensor) -> torch.Tensor:
+        return F.normalize(self.item_proj(item_emb), dim=-1)
+
+    def encode_user(self, history_emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        hist_z = self.encode_items(history_emb)
+        user_z = self.user_pool(hist_z, mask)
+        return F.normalize(user_z, dim=-1)
+
+
 def l2_normalize(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     n = np.linalg.norm(x, axis=-1, keepdims=True)
     return x / (n + eps)
