@@ -41,10 +41,15 @@ class TeacherTwoTower(nn.Module):
     def encode_items(self, item_emb: torch.Tensor) -> torch.Tensor:
         return F.normalize(self.item_proj(item_emb), dim=-1)
 
+    def encode_user_from_item_vectors(
+        self, history_z: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        user_z = self.user_pool(history_z, mask)
+        return F.normalize(user_z, dim=-1)
+
     def encode_user(self, history_emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         hist_z = self.encode_items(history_emb)
-        user_z = self.user_pool(hist_z, mask)
-        return F.normalize(user_z, dim=-1)
+        return self.encode_user_from_item_vectors(hist_z, mask)
 
 
 def l2_normalize(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:

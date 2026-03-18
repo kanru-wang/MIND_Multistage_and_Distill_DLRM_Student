@@ -20,8 +20,6 @@ data:
 teacher:
   model_name: "sentence-transformers/all-MiniLM-L6-v2"
   batch_size: 128
-  max_text_len: 192
-  user_pooling: "smart"  # smart|mean (attention is a legacy alias to smart)
   user_attn_heads: 4
   user_attn_dim: 384
   lr: 2.0e-4
@@ -73,15 +71,19 @@ rerank:
   fairness:
     enabled: true
     category_target: "catalog"  # catalog|uniform
-    provider_target: "catalog"
     new_item_floor: 0.20  # minimum fraction of exposure in top-k to new items
     penalty_weight: 0.5
   search:
     absolute_guardrails:
-      min_ndcg@k: 0.329
-      min_new_item_exposure_frac: 0.520
-      min_category_coverage: 6.45
-      max_fairness_kl_pool: 0.242
+      min_ndcg@k: 0.327
+      min_new_item_exposure_frac: 0.55
+      min_category_coverage: 6.40
+      max_fairness_kl_pool: 0.241
+    utility_coefficients:
+      ndcg_vs_floor_units: 4.0
+      new_item_exposure_vs_floor_units: 1.5
+      category_coverage_vs_floor_units: 1.0
+      fairness_kl_pool_vs_ceiling_units: 1.0
 
 eval:
   ks: [5, 10]

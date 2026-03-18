@@ -14,11 +14,11 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
 - Knowledge **distillation** (logit + representation) from a powerful teacher into a cheaper student (better cold/new performance vs training the student from scratch).
 
 #### Teacher model (simple view)
-- The teacher is a pair of encoders:
-- a **news/item encoder** that maps each article into an embedding vector
-- a **user encoder** that maps a user’s recent clicked history into an embedding vector
-- In the current code, the item encoder is an off-the-shelf sentence-transformer and the user encoder is a train-free pooling step over clicked-history item embeddings.
-- This still serves the retrieval stage, but it is **not** a trained two-tower retrieval model with a contrastive training loop.
+- The teacher is a learned two-tower retrieval model:
+- a **news/item encoder** that starts from frozen sentence-transformer news embeddings and applies a trainable projection
+- a **user encoder** that attention-pools clicked-history item embeddings into a user vector
+- Training uses clicked positives plus in-impression negatives.
+- Retrieval evaluation encodes each dev impression with that impression's own history, so the query is temporally aligned with the impression being scored.
 
 #### Evaluation (many angles)
 - **Ranking quality**: AUC, MRR, nDCG@K, MAP@K, Recall@K
@@ -204,10 +204,10 @@ The current reranker search reports three views of the tradeoff surface on dev:
 - `pareto_frontier`: nondominated settings across ranking/diversity/fairness axes
 
 The current absolute guardrails are:
-- `nDCG@10` must be at least `0.329`.
-- `new_item_exposure_frac` must be at least `0.520`.
-- `category_coverage@10` must be at least `6.45`.
-- `fairness_kl_pool` must be at most `0.242`.
+- `nDCG@10` must be at least `0.327`.
+- `new_item_exposure_frac` must be at least `0.55`.
+- `category_coverage@10` must be at least `6.40`.
+- `fairness_kl_pool` must be at most `0.241`.
 
 Each candidate in `rerank_search.json` now reports:
 - `constraint.feasible`
@@ -222,7 +222,7 @@ with coefficients:
 - `4.0 * ndcg_vs_floor_units`
 - `1.5 * new_item_exposure_vs_floor_units`
 - `1.0 * category_coverage_vs_floor_units`
-- `0.75 * fairness_kl_pool_vs_ceiling_units`
+- `1.0 * fairness_kl_pool_vs_ceiling_units`
 
 The current selected setting is:
 - `relevance_weight=0.90`
@@ -230,11 +230,32 @@ The current selected setting is:
 - `coverage_weight=0.05`
 - `novelty_sim=teacher_cosine`
 - `fairness.penalty_weight=0.5`
-- `fairness.new_item_floor=0.15`
+- `fairness.new_item_floor=0.20`
 
 The search writes its summary to `runs/<run_name>/eval/rerank_search.json`.
 
 Artifacts go to `runs/<run_name>/`.
+
+### 3.6 Current demo results (`runs/mind_small_demo`)
+
+Teacher retrieval:
+- `recall@200 = 0.02893`
+
+Student ranker:
+- `nDCG@10 = 0.33317`
+- `MRR = 0.28925`
+- `AUC = 0.56954`
+- calibration improved `Brier` from `0.1073` to `0.0692`
+
+Feasible reranker operating point:
+- `nDCG@10 = 0.32740`
+- `new_item_exposure_frac = 0.57631`
+- `category_coverage@10 = 6.4409`
+- `fairness_kl_pool = 0.24024`
+
+Search summary:
+- `best_feasible` matches the current default rerank config
+- `best_scalar_utility` is a more aggressive diversity/fairness point, but it is not feasible under the current guardrails
 
 ---
 

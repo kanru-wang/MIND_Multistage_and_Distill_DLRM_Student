@@ -73,12 +73,14 @@ def _build_teacher_samples(
 ) -> tuple[list[TeacherSample], dict[int, list[int]]]:
     samples: list[TeacherSample] = []
     best_hist_by_user: dict[int, list[int]] = {}
+    latest_time_by_user: dict[int, pd.Timestamp] = {}
     rng = np.random.default_rng(seed)
 
     for _, row in tqdm(beh.iterrows(), total=len(beh), desc="Build teacher samples"):
         user_idx = maps.user2idx.get(str(row["user_id"]), 0)
         if user_idx == 0:
             continue
+        row_time = pd.to_datetime(row.get("time"), errors="coerce")
 
         hist_news_idx = [
             maps.news2idx[h]
@@ -88,9 +90,12 @@ def _build_teacher_samples(
         if not hist_news_idx:
             continue
 
-        prev = best_hist_by_user.get(user_idx)
-        if prev is None or len(hist_news_idx) > len(prev):
+        prev_time = latest_time_by_user.get(user_idx)
+        if prev_time is None or pd.isna(prev_time) or (
+            not pd.isna(row_time) and row_time >= prev_time
+        ):
             best_hist_by_user[user_idx] = hist_news_idx
+            latest_time_by_user[user_idx] = row_time
 
         neg_candidates = [
             maps.news2idx.get(str(news_id), 0)
@@ -294,6 +299,15 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
 
     np.save(art_root / "item_teacher_emb.npy", item_teacher_emb.astype(np.float32))
     np.save(art_root / "user_teacher_emb.npy", user_teacher_emb.astype(np.float32))
+    torch.save(
+        {
+            "item_dim": int(item_base.shape[1]),
+            "hidden_dim": hidden_dim,
+            "heads": heads,
+            "state_dict": model.state_dict(),
+        },
+        art_root / "model.pt",
+    )
 
     meta = {
         "model_name": teacher_cfg["model_name"],

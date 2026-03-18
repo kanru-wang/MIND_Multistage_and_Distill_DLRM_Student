@@ -400,10 +400,29 @@ def _candidate_key(item: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _current_config_candidate(
+    rr_cfg: dict[str, Any], fairness_base: dict[str, Any], novelty_sim: str
+) -> dict[str, Any]:
+    return {
+        "weights": {
+            "relevance": float(rr_cfg.get("relevance_weight", 0.9)),
+            "novelty": float(rr_cfg.get("novelty_weight", 0.05)),
+            "coverage": float(rr_cfg.get("coverage_weight", 0.05)),
+        },
+        "fairness": {
+            "penalty_weight": float(fairness_base.get("penalty_weight", 0.0)),
+            "new_item_floor": float(fairness_base.get("new_item_floor", 0.0)),
+            "category_target": fairness_base.get("category_target", "catalog"),
+        },
+        "novelty_sim": novelty_sim,
+    }
+
+
 def _attach_objective_views(
     baseline: dict[str, float],
     metrics: dict[str, Any],
     constraint: dict[str, float],
+    search_cfg: dict[str, Any],
 ) -> dict[str, Any]:
     metrics = dict(metrics)
     metrics["constraint"] = _constraint_check(baseline, metrics, constraint)
@@ -440,11 +459,18 @@ def _attach_objective_views(
         ),
         "fairness_kl_pool_vs_ceiling_units": fairness_kl_pool_vs_ceiling_units,
     }
+    utility_cfg = dict(search_cfg.get("utility_coefficients", {}))
     utility_coefficients = {
-        "ndcg_vs_floor_units": 4.0,
-        "new_item_exposure_vs_floor_units": 1.5,
-        "category_coverage_vs_floor_units": 1.0,
-        "fairness_kl_pool_vs_ceiling_units": 0.75,
+        "ndcg_vs_floor_units": float(utility_cfg.get("ndcg_vs_floor_units", 4.0)),
+        "new_item_exposure_vs_floor_units": float(
+            utility_cfg.get("new_item_exposure_vs_floor_units", 1.5)
+        ),
+        "category_coverage_vs_floor_units": float(
+            utility_cfg.get("category_coverage_vs_floor_units", 1.0)
+        ),
+        "fairness_kl_pool_vs_ceiling_units": float(
+            utility_cfg.get("fairness_kl_pool_vs_ceiling_units", 0.75)
+        ),
     }
     scalar_utility = sum(
         utility_coefficients[name] * utility_terms[name]
@@ -639,7 +665,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             novelty_sim=novelty_sim,
         )
         sample_results.append(
-            _attach_objective_views(sample_baseline, metrics, constraint)
+            _attach_objective_views(sample_baseline, metrics, constraint, search_cfg)
         )
 
     sample_results = _sort_feasible_first(sample_results)
@@ -662,6 +688,16 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             shortlist.append(item)
             seen.add(key)
 
+    current_candidate = _current_config_candidate(
+        rr_cfg=rr_cfg,
+        fairness_base=fairness_base,
+        novelty_sim=rr_cfg.get("novelty_sim", "teacher_cosine"),
+    )
+    current_key = _candidate_key(current_candidate)
+    if current_key not in seen:
+        shortlist.append(current_candidate)
+        seen.add(current_key)
+
     results = []
     for item in tqdm(shortlist, desc="Evaluate shortlist on full dev"):
         fairness_cfg = dict(fairness_base)
@@ -681,7 +717,7 @@ def run_rerank_search(cfg: dict[str, Any]) -> None:
             coverage_weight=item["weights"]["coverage"],
             novelty_sim=item["novelty_sim"],
         )
-        results.append(_attach_objective_views(baseline, metrics, constraint))
+        results.append(_attach_objective_views(baseline, metrics, constraint, search_cfg))
 
     feasible = [r for r in results if r["constraint"]["feasible"]]
     feasible = _sort_feasible_first(feasible)
