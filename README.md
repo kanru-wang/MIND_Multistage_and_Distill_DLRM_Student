@@ -72,32 +72,32 @@ Fairness target note:
 - Candidate `D` has relevance score `0.78`, category `Health`, entities `{WHO, vaccine}`, and is not new.
 
 - **Novelty example with `teacher_cosine`**:
-- If `C` has teacher-embedding cosine similarities `0.90` to `A` and `0.35` to `B`, then `novelty(C) = -max(0.90, 0.35) = -0.90`.
-- If `D` has similarities `0.20` to `A` and `0.10` to `B`, then `novelty(D) = -0.20`.
-- Because `-0.20 > -0.90`, `D` is treated as more novel than `C`.
+  - If `C` has teacher-embedding cosine similarities `0.90` to `A` and `0.35` to `B`, then `novelty(C) = -max(0.90, 0.35) = -0.90`.
+  - If `D` has similarities `0.20` to `A` and `0.10` to `B`, then `novelty(D) = -0.20`.
+  - Because `-0.20 > -0.90`, `D` is treated as more novel than `C`.
 
 - **Coverage example**:
-- Suppose the selected list has already covered categories `{Sports, Politics}` and entities `{Messi, Real Madrid}`.
-- If `coverage.category_bonus = 1.0`, `coverage.entity_bonus = 0.3`, and `max_new_entities_per_item = 3`:
-- `C` is in `Sports`, which is already covered, so it gets no category bonus. It adds one new entity, `Inter Miami`, so `coverage(C) = 0.3`.
-- `D` is in `Health`, which is new, so it gets `1.0` category bonus. If both `WHO` and `vaccine` are new, it also gets `2 * 0.3 = 0.6` entity bonus, so `coverage(D) = 1.6`.
+  - Suppose the selected list has already covered categories `{Sports, Politics}` and entities `{Messi, Real Madrid}`.
+  - If `coverage.category_bonus = 1.0`, `coverage.entity_bonus = 0.3`, and `max_new_entities_per_item = 3`:
+  - `C` is in `Sports`, which is already covered, so it gets no category bonus. It adds one new entity, `Inter Miami`, so `coverage(C) = 0.3`.
+  - `D` is in `Health`, which is new, so it gets `1.0` category bonus. If both `WHO` and `vaccine` are new, it also gets `2 * 0.3 = 0.6` entity bonus, so `coverage(D) = 1.6`.
 
 - **Exposure fairness example**:
-- Suppose the current top-3 list has categories `[Sports, Sports, Health]`.
-- With log position weights, a typical exposure pattern is roughly `[1.00, 0.63, 0.50]`.
-- Then the actual category exposure map is:
-- `Sports: 1.00 + 0.63 = 1.63`
-- `Health: 0.50`
-- After normalization, this becomes `p`, the actual exposure share by category.
-- If the reference candidate pool category mix is `Sports: 50%`, `Health: 30%`, `Politics: 20%`, that normalized mix is `q`.
-- The fairness penalty compares `p` and `q` using both KL divergence and L1 distance.
+  - Suppose the current top-3 list has categories `[Sports, Sports, Health]`.
+  - With log position weights, a typical exposure pattern is roughly `[1.00, 0.63, 0.50]`.
+  - Then the actual category exposure map is:
+  - `Sports: 1.00 + 0.63 = 1.63`
+  - `Health: 0.50`
+  - After normalization, this becomes `p`, the actual exposure share by category.
+  - If the reference candidate pool category mix is `Sports: 50%`, `Health: 30%`, `Politics: 20%`, that normalized mix is `q`.
+  - The fairness penalty compares `p` and `q` using both KL divergence and L1 distance.
 
 - **New-item exposure penalty example**:
-- Suppose `new_item_floor = 0.20`.
-- If only the rank-3 item is new, then new-item exposure is `0.50`.
-- Total exposure is `1.00 + 0.63 + 0.50 = 2.13`.
-- So `new_item_exposure_frac = 0.50 / 2.13 = 0.235`, which is above the floor, so no extra penalty is added.
-- If no selected item is new, then `new_item_exposure_frac = 0.0`, which is below `0.20`, so the fairness penalty is increased.
+  - Suppose `new_item_floor = 0.20`.
+  - If only the rank-3 item is new, then new-item exposure is `0.50`.
+  - Total exposure is `1.00 + 0.63 + 0.50 = 2.13`.
+  - So `new_item_exposure_frac = 0.50 / 2.13 = 0.235`, which is above the floor, so no extra penalty is added.
+  - If no selected item is new, then `new_item_exposure_frac = 0.0`, which is below `0.20`, so the fairness penalty is increased.
 
 ---
 
@@ -145,7 +145,7 @@ If you choose to use these files, a common approach is to use KG triples `(entit
 
 ---
 
-## 2.2) What `run_preprocess()` does (plain English)
+## 2.2) What `run_preprocess()` does
 
 `run_preprocess()` converts raw MIND TSV files into model-ready parquet/json files.
 
