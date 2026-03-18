@@ -24,6 +24,7 @@ class TeacherSample:
     user_idx: int
     pos_news_idx: int
     hist_news_idx: list[int]
+    neg_news_idx: list[int]
 
 
 class TeacherDataset(Dataset):
@@ -38,28 +39,41 @@ class TeacherDataset(Dataset):
 
 
 def _collate_teacher_batch(batch: list[TeacherSample]) -> dict[str, torch.Tensor]:
-    max_len = max(len(sample.hist_news_idx) for sample in batch)
-    hist = torch.zeros((len(batch), max_len), dtype=torch.long)
-    mask = torch.zeros((len(batch), max_len), dtype=torch.bool)
+    max_hist_len = max(len(sample.hist_news_idx) for sample in batch)
+    max_neg_len = max(len(sample.neg_news_idx) for sample in batch)
+    hist = torch.zeros((len(batch), max_hist_len), dtype=torch.long)
+    hist_mask = torch.zeros((len(batch), max_hist_len), dtype=torch.bool)
+    neg = torch.zeros((len(batch), max_neg_len), dtype=torch.long)
+    neg_mask = torch.zeros((len(batch), max_neg_len), dtype=torch.bool)
     for i, sample in enumerate(batch):
-        n = len(sample.hist_news_idx)
-        hist[i, :n] = torch.tensor(sample.hist_news_idx, dtype=torch.long)
-        mask[i, :n] = True
+        hist_len = len(sample.hist_news_idx)
+        neg_len = len(sample.neg_news_idx)
+        hist[i, :hist_len] = torch.tensor(sample.hist_news_idx, dtype=torch.long)
+        hist_mask[i, :hist_len] = True
+        neg[i, :neg_len] = torch.tensor(sample.neg_news_idx, dtype=torch.long)
+        neg_mask[i, :neg_len] = True
     return {
         "user_idx": torch.tensor([sample.user_idx for sample in batch], dtype=torch.long),
         "pos_news_idx": torch.tensor(
             [sample.pos_news_idx for sample in batch], dtype=torch.long
         ),
         "hist_news_idx": hist,
-        "hist_mask": mask,
+        "hist_mask": hist_mask,
+        "neg_news_idx": neg,
+        "neg_mask": neg_mask,
     }
 
 
 def _build_teacher_samples(
-    beh: pd.DataFrame, maps: IdMaps, max_hist: int
+    beh: pd.DataFrame,
+    maps: IdMaps,
+    max_hist: int,
+    negatives_per_positive: int,
+    seed: int,
 ) -> tuple[list[TeacherSample], dict[int, list[int]]]:
     samples: list[TeacherSample] = []
     best_hist_by_user: dict[int, list[int]] = {}
+    rng = np.random.default_rng(seed)
 
     for _, row in tqdm(beh.iterrows(), total=len(beh), desc="Build teacher samples"):
         user_idx = maps.user2idx.get(str(row["user_id"]), 0)
@@ -78,17 +92,32 @@ def _build_teacher_samples(
         if prev is None or len(hist_news_idx) > len(prev):
             best_hist_by_user[user_idx] = hist_news_idx
 
+        neg_candidates = [
+            maps.news2idx.get(str(news_id), 0)
+            for news_id, label in zip(row["cand_news_id"], row["cand_label"])
+            if int(label) == 0 and maps.news2idx.get(str(news_id), 0) != 0
+        ]
+        if not neg_candidates:
+            continue
+
         for news_id, label in zip(row["cand_news_id"], row["cand_label"]):
             if int(label) != 1:
                 continue
             news_idx = maps.news2idx.get(str(news_id), 0)
             if news_idx == 0:
                 continue
+            if len(neg_candidates) > negatives_per_positive:
+                neg_news_idx = rng.choice(
+                    neg_candidates, size=negatives_per_positive, replace=False
+                ).tolist()
+            else:
+                neg_news_idx = list(neg_candidates)
             samples.append(
                 TeacherSample(
                     user_idx=user_idx,
                     pos_news_idx=news_idx,
                     hist_news_idx=hist_news_idx,
+                    neg_news_idx=neg_news_idx,
                 )
             )
 
@@ -126,7 +155,7 @@ def _compute_user_embeddings(
     n_users: int,
     device: torch.device,
 ) -> np.ndarray:
-    hidden_dim = model.item_proj[-1].out_features
+    hidden_dim = model.item_proj.out_features
     user_emb = np.zeros((n_users, hidden_dim), dtype=np.float32)
     model.eval()
     with torch.no_grad():
@@ -162,18 +191,33 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
     lr = float(teacher_cfg.get("lr", 2.0e-4))
     hidden_dim = int(teacher_cfg.get("user_attn_dim", 256))
     heads = int(teacher_cfg.get("user_attn_heads", 4))
+    temperature = float(teacher_cfg.get("temperature", 0.07))
+    negatives_per_positive = int(teacher_cfg.get("negatives_per_positive", 8))
     device_str = str(teacher_cfg.get("device", "cuda"))
     if device_str == "cuda" and not torch.cuda.is_available():
         device_str = "cpu"
     device = torch.device(device_str)
 
-    st = SentenceTransformer(teacher_cfg["model_name"], device=device_str)
+    st = SentenceTransformer(
+        teacher_cfg["model_name"],
+        device=device_str,
+        local_files_only=True,
+    )
     item_base = _encode_news_text(st=st, news=news, batch_size=batch_size)
+    item_base_dim = int(item_base.shape[1])
+    if hidden_dim <= 0:
+        hidden_dim = item_base_dim
 
     raw_root = Path(cfg["data"]["raw_root"]) / cfg["data"]["train_dir"]
     beh_train = read_behaviors_tsv(raw_root / "behaviors.tsv")
     max_hist = int(cfg["data"]["max_history"])
-    samples, histories_by_user = _build_teacher_samples(beh_train, maps, max_hist=max_hist)
+    samples, histories_by_user = _build_teacher_samples(
+        beh_train,
+        maps,
+        max_hist=max_hist,
+        negatives_per_positive=negatives_per_positive,
+        seed=seed,
+    )
     if not samples:
         raise ValueError("No teacher training samples were built from train behaviors.")
 
@@ -202,17 +246,32 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
             pos_idx = batch["pos_news_idx"].to(device)
             hist_idx = batch["hist_news_idx"].to(device)
             hist_mask = batch["hist_mask"].to(device)
+            neg_idx = batch["neg_news_idx"].to(device)
+            neg_mask = batch["neg_mask"].to(device)
 
             pos_base = item_base_tensor[pos_idx]
             hist_base = item_base_tensor[hist_idx]
+            neg_base = item_base_tensor[neg_idx]
 
             user_z = model.encode_user(hist_base, hist_mask)
             item_z = model.encode_items(pos_base)
-            logits = user_z @ item_z.T
-            targets = torch.arange(logits.size(0), device=device)
-            loss_u = F.cross_entropy(logits, targets)
-            loss_i = F.cross_entropy(logits.T, targets)
-            loss = 0.5 * (loss_u + loss_i)
+            neg_z = model.encode_items(neg_base.view(-1, neg_base.size(-1))).view(
+                neg_base.size(0), neg_base.size(1), -1
+            )
+
+            pos_logits = (user_z * item_z).sum(dim=1, keepdim=True)
+            neg_logits = (user_z.unsqueeze(1) * neg_z).sum(dim=2)
+            neg_logits = neg_logits.masked_fill(~neg_mask, float("-inf"))
+            logits_local = torch.cat([pos_logits, neg_logits], dim=1) / temperature
+            local_targets = torch.zeros(logits_local.size(0), dtype=torch.long, device=device)
+
+            logits_inbatch = (user_z @ item_z.T) / temperature
+            inbatch_targets = torch.arange(logits_inbatch.size(0), device=device)
+
+            loss_local = F.cross_entropy(logits_local, local_targets)
+            loss_inbatch_u = F.cross_entropy(logits_inbatch, inbatch_targets)
+            loss_inbatch_i = F.cross_entropy(logits_inbatch.T, inbatch_targets)
+            loss = loss_local + 0.5 * (loss_inbatch_u + loss_inbatch_i)
 
             opt.zero_grad()
             loss.backward()
@@ -243,6 +302,8 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
         "teacher_dim": int(item_teacher_emb.shape[1]),
         "hidden_dim": hidden_dim,
         "user_pooling": "attention",
+        "temperature": temperature,
+        "negatives_per_positive": negatives_per_positive,
         "train_samples": int(len(samples)),
         "train_users": int(len(histories_by_user)),
         "epochs": epochs,

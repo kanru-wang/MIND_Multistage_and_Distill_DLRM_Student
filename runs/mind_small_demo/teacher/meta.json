@@ -1,6 +1,17 @@
 {
   "model_name": "sentence-transformers/all-MiniLM-L6-v2",
-  "dim": 384,
   "device": "cpu",
-  "pooling": "smart"
+  "item_base_dim": 384,
+  "teacher_dim": 384,
+  "hidden_dim": 384,
+  "user_pooling": "attention",
+  "temperature": 0.07,
+  "negatives_per_positive": 8,
+  "train_samples": 231530,
+  "train_users": 49108,
+  "epochs": 4,
+  "lr": 0.0002,
+  "train_loss_mean": 6.215600187966941,
+  "item_encoder": "sentence_transformer_frozen_plus_projection",
+  "user_encoder": "attention_pool_over_history"
 }

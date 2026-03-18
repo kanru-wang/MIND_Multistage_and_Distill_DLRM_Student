@@ -31,11 +31,11 @@ class HistoryAttentionPool(nn.Module):
 class TeacherTwoTower(nn.Module):
     def __init__(self, item_dim: int, hidden_dim: int, heads: int = 4) -> None:
         super().__init__()
-        self.item_proj = nn.Sequential(
-            nn.Linear(item_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-        )
+        self.item_proj = nn.Linear(item_dim, hidden_dim, bias=False)
+        if item_dim == hidden_dim:
+            nn.init.eye_(self.item_proj.weight)
+        else:
+            nn.init.xavier_uniform_(self.item_proj.weight)
         self.user_pool = HistoryAttentionPool(dim=hidden_dim, heads=heads)
 
     def encode_items(self, item_emb: torch.Tensor) -> torch.Tensor:

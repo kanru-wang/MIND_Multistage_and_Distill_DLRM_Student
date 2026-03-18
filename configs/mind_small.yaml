@@ -23,9 +23,11 @@ teacher:
   max_text_len: 192
   user_pooling: "smart"  # smart|mean (attention is a legacy alias to smart)
   user_attn_heads: 4
-  user_attn_dim: 256
+  user_attn_dim: 384
   lr: 2.0e-4
-  epochs: 1
+  epochs: 4
+  temperature: 0.07
+  negatives_per_positive: 8
   device: "cuda"  # cuda|cpu
 
 retrieval:
