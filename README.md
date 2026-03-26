@@ -20,6 +20,29 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
 - Training uses clicked positives plus in-impression negatives.
 - Retrieval evaluation encodes each dev impression with that impression's own history, so the query is temporally aligned with the impression being scored.
 
+#### Teacher and retrieval notes
+- In MIND `behaviors.tsv`, `history` is a list of previously clicked news IDs for that user before the current impression time. It is not a list of previous impressions.
+- The user embedding is built from those clicked-history items before the current impression.
+- During retrieval evaluation, the query vector for a row is built from that row's own `history` only, not from some later history for the same user.
+- `encode_user_from_item_vectors(history_z, mask)` expects:
+  - `history_z`: shape `[B, T, D]` where `B` is batch size, `T` is history length, and `D` is the teacher hidden dimension
+  - `mask`: shape `[B, T]` with `True` for valid history positions and `False` for padding
+  - output: shape `[B, D]`
+- Item embedding path:
+  - `item_proj`
+  - `normalize`
+- User embedding path:
+  - `item_proj` on each clicked history item
+  - `normalize` on each clicked history item
+  - `HistoryAttentionPool` (`MultiheadAttention` + learned query)
+  - `normalize` on the pooled user vector
+- The learned query vector in `HistoryAttentionPool` is a trainable vector used to emphasize certain click history over other click history. This query vector is global, not per-user.
+- During teacher training, the trainable part are:
+  - `item_proj`
+  - the multi-head attention parameters inside `HistoryAttentionPool`
+  - the learned query vector
+- The training objective pushes each user vector closer to its clicked positive item and farther from sampled in-impression negatives and other in-batch positives.
+
 #### Evaluation (many angles)
 - **Ranking quality**: AUC, MRR, nDCG@K, MAP@K, Recall@K
 - **Calibration**: ECE (expected calibration error), Brier score
