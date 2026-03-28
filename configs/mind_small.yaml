@@ -23,7 +23,12 @@ teacher:
   user_attn_heads: 4
   user_attn_dim: 384
   lr: 2.0e-4
-  epochs: 4
+  epochs: 8
+  early_stopping:
+    enabled: true
+    patience: 2
+    monitor: "retrieval_recall@k"
+    min_delta: 1.0e-4
   temperature: 0.07
   negatives_per_positive: 8
   device: "cuda"  # cuda|cpu
@@ -37,7 +42,11 @@ ranker:
   batch_size: 1024
   lr: 1.0e-3
   weight_decay: 1.0e-6
-  epochs: 2
+  epochs: 8
+  early_stopping:
+    enabled: true
+    patience: 2
+    min_delta: 1.0e-5
   device: "cuda"
   dlrm:
     emb_dim: 64

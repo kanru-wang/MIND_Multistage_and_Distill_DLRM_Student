@@ -1,3 +1,9 @@
 {
-  "best_dev_auc": 0.5831539334925984
+  "best_dev_auc": 0.5744089746097468,
+  "best_epoch": 5,
+  "early_stopping_enabled": true,
+  "early_stopping_patience": 2,
+  "early_stopping_min_delta": 1e-05,
+  "stop_reason": "early_stopping",
+  "stopped_epoch": 7
 }

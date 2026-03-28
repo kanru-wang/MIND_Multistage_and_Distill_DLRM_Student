@@ -15,8 +15,8 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
 
 #### Teacher model (simple view)
 - The teacher is a learned two-tower retrieval model:
-- a **news/item encoder** that starts from frozen sentence-transformer news embeddings and applies a trainable projection
-- a **user encoder** that attention-pools clicked-history item embeddings into a user vector
+  - a **news/item encoder** that starts from frozen sentence-transformer news embeddings and applies a trainable projection
+  - a **user encoder** that attention-pools clicked-history item embeddings into a user vector
 - Training uses clicked positives plus in-impression negatives.
 - Retrieval evaluation encodes each dev impression with that impression's own history, so the query is temporally aligned with the impression being scored.
 
@@ -258,17 +258,23 @@ The current selected setting is:
 The search writes its summary to `runs/<run_name>/eval/rerank_search.json`.
 
 Artifacts go to `runs/<run_name>/`.
+Training logs are written to `runs/<run_name>/teacher/epochs.json` and `runs/<run_name>/ranker/epochs.json`.
 
 ### 3.6 Current demo results (`runs/mind_small_demo`)
 
 Teacher retrieval:
-- `recall@200 = 0.02893`
+- `recall@200 = 0.02974`
+- early stopping monitor: `retrieval_recall@200`
+- best teacher epoch: `2`
 
 Student ranker:
-- `nDCG@10 = 0.33317`
-- `MRR = 0.28925`
-- `AUC = 0.56954`
-- calibration improved `Brier` from `0.1073` to `0.0692`
+- `nDCG@5 = 0.27896`
+- `nDCG@10 = 0.34136`
+- `MRR = 0.29738`
+- `AUC = 0.57350`
+- `MAP@10 = 0.24975`
+- best dev AUC during training: `0.57441` at epoch `5`
+- calibration changed `Brier` from `0.1112` to `0.0875`
 
 Feasible reranker operating point:
 - `nDCG@10 = 0.32740`

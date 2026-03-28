@@ -104,10 +104,18 @@ def run_train_ranker(cfg: dict[str, Any]) -> None:
     lam_repr = float(dist_cfg.get("lambda_repr", 0.1))
     w_cold = float(dist_cfg.get("cold_weight", 2.0))
     w_warm = float(dist_cfg.get("warm_weight", 0.3))
+    es_cfg = dict(cfg["ranker"].get("early_stopping", {}))
+    es_enabled = bool(es_cfg.get("enabled", True))
+    es_patience = int(es_cfg.get("patience", 2))
+    es_min_delta = float(es_cfg.get("min_delta", 1.0e-4))
 
     epochs = int(cfg["ranker"]["epochs"])
 
     best_auc = -1.0
+    best_epoch = 0
+    epochs_without_improvement = 0
+    stop_reason = "max_epochs"
+    epoch_metrics: list[dict[str, float | int]] = []
     for ep in range(1, epochs + 1):
         model.train()
         proj.train()
@@ -191,27 +199,49 @@ def run_train_ranker(cfg: dict[str, Any]) -> None:
         except ValueError:
             auc = 0.0
 
-        save_json(
-            art_root / f"epoch_{ep}.json",
+        epoch_metrics.append(
             {
                 "epoch": ep,
                 "train_loss_mean": float(np.mean(losses) if losses else 0.0),
                 "dev_auc": auc,
-            },
+            }
         )
+        save_json(art_root / "epochs.json", epoch_metrics)
 
-        if auc > best_auc:
+        improved = (auc - best_auc) > es_min_delta
+        if improved:
             best_auc = auc
+            best_epoch = ep
+            epochs_without_improvement = 0
             torch.save(
                 {
                     "model": model.state_dict(),
                     "proj": proj.state_dict(),
                     "cfg": cfg,
+                    "epoch": ep,
+                    "dev_auc": auc,
                 },
                 art_root / "best.pt",
             )
+        else:
+            epochs_without_improvement += 1
 
-    save_json(art_root / "train_summary.json", {"best_dev_auc": best_auc})
+        if es_enabled and epochs_without_improvement >= es_patience:
+            stop_reason = "early_stopping"
+            break
+
+    save_json(
+        art_root / "train_summary.json",
+        {
+            "best_dev_auc": best_auc,
+            "best_epoch": best_epoch,
+            "early_stopping_enabled": es_enabled,
+            "early_stopping_patience": es_patience,
+            "early_stopping_min_delta": es_min_delta,
+            "stop_reason": stop_reason,
+            "stopped_epoch": ep,
+        },
+    )
 
     cal_cfg = dict(cfg["ranker"].get("calibration", {}))
     if bool(cal_cfg.get("enabled", True)):

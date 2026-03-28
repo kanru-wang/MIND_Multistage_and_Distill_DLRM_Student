@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import faiss
 import numpy as np
 import pandas as pd
 import torch
@@ -62,6 +63,99 @@ def _collate_teacher_batch(batch: list[TeacherSample]) -> dict[str, torch.Tensor
         "neg_news_idx": neg,
         "neg_mask": neg_mask,
     }
+
+
+def _teacher_batch_loss(
+    model: TeacherTwoTower,
+    item_base_tensor: torch.Tensor,
+    batch: dict[str, torch.Tensor],
+    temperature: float,
+    device: torch.device,
+) -> torch.Tensor:
+    pos_idx = batch["pos_news_idx"].to(device)
+    hist_idx = batch["hist_news_idx"].to(device)
+    hist_mask = batch["hist_mask"].to(device)
+    neg_idx = batch["neg_news_idx"].to(device)
+    neg_mask = batch["neg_mask"].to(device)
+
+    pos_base = item_base_tensor[pos_idx]
+    hist_base = item_base_tensor[hist_idx]
+    neg_base = item_base_tensor[neg_idx]
+
+    user_z = model.encode_user(hist_base, hist_mask)
+    item_z = model.encode_items(pos_base)
+    neg_z = model.encode_items(neg_base.view(-1, neg_base.size(-1))).view(
+        neg_base.size(0), neg_base.size(1), -1
+    )
+
+    pos_logits = (user_z * item_z).sum(dim=1, keepdim=True)
+    neg_logits = (user_z.unsqueeze(1) * neg_z).sum(dim=2)
+    neg_logits = neg_logits.masked_fill(~neg_mask, float("-inf"))
+    logits_local = torch.cat([pos_logits, neg_logits], dim=1) / temperature
+    local_targets = torch.zeros(logits_local.size(0), dtype=torch.long, device=device)
+
+    logits_inbatch = (user_z @ item_z.T) / temperature
+    inbatch_targets = torch.arange(logits_inbatch.size(0), device=device)
+
+    loss_local = F.cross_entropy(logits_local, local_targets)
+    loss_inbatch_u = F.cross_entropy(logits_inbatch, inbatch_targets)
+    loss_inbatch_i = F.cross_entropy(logits_inbatch.T, inbatch_targets)
+    return loss_local + 0.5 * (loss_inbatch_u + loss_inbatch_i)
+
+
+def _eval_teacher_recall_at_k(
+    model: TeacherTwoTower,
+    item_base_tensor: torch.Tensor,
+    beh_dev: pd.DataFrame,
+    maps: IdMaps,
+    max_hist: int,
+    topk: int,
+    device: torch.device,
+) -> tuple[float, int]:
+    model.eval()
+    with torch.no_grad():
+        item_emb = model.encode_items(item_base_tensor).detach().cpu().numpy().astype(
+            np.float32
+        )
+
+    index = faiss.IndexFlatIP(item_emb.shape[1])
+    index.add(item_emb)
+    item_emb_tensor = torch.tensor(item_emb, dtype=torch.float32, device=device)
+
+    recalls = []
+    with torch.no_grad():
+        for _, r in tqdm(beh_dev.iterrows(), total=len(beh_dev), desc="Teacher recall"):
+            hist_idx = [
+                maps.news2idx[h]
+                for h in r["history"][-max_hist:]
+                if h in maps.news2idx and maps.news2idx[h] != 0
+            ]
+            if not hist_idx:
+                continue
+
+            clicked = [
+                maps.news2idx.get(str(n), 0)
+                for n, l in zip(r["cand_news_id"], r["cand_label"])
+                if int(l) == 1 and maps.news2idx.get(str(n), 0) != 0
+            ]
+            if not clicked:
+                continue
+
+            hist_z = item_emb_tensor[hist_idx].unsqueeze(0)
+            hist_mask = torch.ones((1, len(hist_idx)), dtype=torch.bool, device=device)
+            q = (
+                model.encode_user_from_item_vectors(hist_z, hist_mask)
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.float32)
+            )
+            _, retrieved_idx = index.search(q, topk)
+            retrieved = set(retrieved_idx[0].tolist())
+            hit = sum(1 for c in clicked if c in retrieved)
+            recalls.append(hit / len(clicked))
+
+    return float(np.mean(recalls) if recalls else 0.0), int(len(recalls))
 
 
 def _build_teacher_samples(
@@ -202,6 +296,11 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
     if device_str == "cuda" and not torch.cuda.is_available():
         device_str = "cpu"
     device = torch.device(device_str)
+    es_cfg = dict(teacher_cfg.get("early_stopping", {}))
+    es_enabled = bool(es_cfg.get("enabled", True))
+    es_patience = int(es_cfg.get("patience", 2))
+    es_min_delta = float(es_cfg.get("min_delta", 1.0e-4))
+    monitor_name = str(es_cfg.get("monitor", "retrieval_recall@k"))
 
     st = SentenceTransformer(
         teacher_cfg["model_name"],
@@ -215,7 +314,10 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
 
     raw_root = Path(cfg["data"]["raw_root"]) / cfg["data"]["train_dir"]
     beh_train = read_behaviors_tsv(raw_root / "behaviors.tsv")
+    raw_dev_root = Path(cfg["data"]["raw_root"]) / cfg["data"]["dev_dir"]
+    beh_dev = read_behaviors_tsv(raw_dev_root / "behaviors.tsv")
     max_hist = int(cfg["data"]["max_history"])
+    topk = int(cfg["retrieval"]["topk"])
     samples, histories_by_user = _build_teacher_samples(
         beh_train,
         maps,
@@ -225,6 +327,13 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
     )
     if not samples:
         raise ValueError("No teacher training samples were built from train behaviors.")
+    dev_samples, _ = _build_teacher_samples(
+        beh_dev,
+        maps,
+        max_hist=max_hist,
+        negatives_per_positive=negatives_per_positive,
+        seed=seed + 1,
+    )
 
     train_ds = TeacherDataset(samples)
     train_loader = DataLoader(
@@ -234,6 +343,16 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
         num_workers=0,
         collate_fn=_collate_teacher_batch,
     )
+    dev_loader = None
+    if dev_samples:
+        dev_ds = TeacherDataset(dev_samples)
+        dev_loader = DataLoader(
+            dev_ds,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=0,
+            collate_fn=_collate_teacher_batch,
+        )
 
     item_base_tensor = torch.tensor(item_base, dtype=torch.float32, device=device)
     model = TeacherTwoTower(
@@ -244,39 +363,24 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1.0e-6)
 
     train_loss_mean = 0.0
+    best_metric = float("-inf")
+    best_epoch = 0
+    epochs_without_improvement = 0
+    stop_reason = "max_epochs"
+    best_dev_loss_mean = float("inf")
+    best_eval_count = 0
+    epoch_metrics: list[dict[str, float | int]] = []
     for epoch in range(1, epochs + 1):
         model.train()
         losses = []
         for batch in tqdm(train_loader, desc=f"Train teacher ep {epoch}"):
-            pos_idx = batch["pos_news_idx"].to(device)
-            hist_idx = batch["hist_news_idx"].to(device)
-            hist_mask = batch["hist_mask"].to(device)
-            neg_idx = batch["neg_news_idx"].to(device)
-            neg_mask = batch["neg_mask"].to(device)
-
-            pos_base = item_base_tensor[pos_idx]
-            hist_base = item_base_tensor[hist_idx]
-            neg_base = item_base_tensor[neg_idx]
-
-            user_z = model.encode_user(hist_base, hist_mask)
-            item_z = model.encode_items(pos_base)
-            neg_z = model.encode_items(neg_base.view(-1, neg_base.size(-1))).view(
-                neg_base.size(0), neg_base.size(1), -1
+            loss = _teacher_batch_loss(
+                model=model,
+                item_base_tensor=item_base_tensor,
+                batch=batch,
+                temperature=temperature,
+                device=device,
             )
-
-            pos_logits = (user_z * item_z).sum(dim=1, keepdim=True)
-            neg_logits = (user_z.unsqueeze(1) * neg_z).sum(dim=2)
-            neg_logits = neg_logits.masked_fill(~neg_mask, float("-inf"))
-            logits_local = torch.cat([pos_logits, neg_logits], dim=1) / temperature
-            local_targets = torch.zeros(logits_local.size(0), dtype=torch.long, device=device)
-
-            logits_inbatch = (user_z @ item_z.T) / temperature
-            inbatch_targets = torch.arange(logits_inbatch.size(0), device=device)
-
-            loss_local = F.cross_entropy(logits_local, local_targets)
-            loss_inbatch_u = F.cross_entropy(logits_inbatch, inbatch_targets)
-            loss_inbatch_i = F.cross_entropy(logits_inbatch.T, inbatch_targets)
-            loss = loss_local + 0.5 * (loss_inbatch_u + loss_inbatch_i)
 
             opt.zero_grad()
             loss.backward()
@@ -285,6 +389,80 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
             losses.append(float(loss.item()))
 
         train_loss_mean = float(np.mean(losses) if losses else 0.0)
+        val_loss_mean = train_loss_mean
+        if dev_loader is not None:
+            model.eval()
+            val_losses = []
+            with torch.no_grad():
+                for batch in tqdm(dev_loader, desc=f"Dev teacher ep {epoch}"):
+                    loss = _teacher_batch_loss(
+                        model=model,
+                        item_base_tensor=item_base_tensor,
+                        batch=batch,
+                        temperature=temperature,
+                        device=device,
+                    )
+                    val_losses.append(float(loss.item()))
+            val_loss_mean = float(np.mean(val_losses) if val_losses else train_loss_mean)
+        recall_at_k, n_eval = _eval_teacher_recall_at_k(
+            model=model,
+            item_base_tensor=item_base_tensor,
+            beh_dev=beh_dev,
+            maps=maps,
+            max_hist=max_hist,
+            topk=topk,
+            device=device,
+        )
+
+        epoch_metrics.append(
+            {
+                "epoch": epoch,
+                "train_loss_mean": train_loss_mean,
+                "dev_loss_mean": val_loss_mean,
+                "dev_recall_at_k": recall_at_k,
+                "dev_recall_k": topk,
+                "n_eval": n_eval,
+            }
+        )
+        save_json(art_root / "epochs.json", epoch_metrics)
+
+        improved = (recall_at_k - best_metric) > es_min_delta
+        if improved:
+            best_metric = recall_at_k
+            best_epoch = epoch
+            best_dev_loss_mean = val_loss_mean
+            best_eval_count = n_eval
+            epochs_without_improvement = 0
+            torch.save(
+                {
+                    "item_dim": int(item_base.shape[1]),
+                    "hidden_dim": hidden_dim,
+                    "heads": heads,
+                    "state_dict": model.state_dict(),
+                    "epoch": epoch,
+                    "train_loss_mean": train_loss_mean,
+                    "dev_loss_mean": val_loss_mean,
+                    "dev_recall_at_k": recall_at_k,
+                    "dev_recall_k": topk,
+                    "n_eval": n_eval,
+                },
+                art_root / "best.pt",
+            )
+        else:
+            epochs_without_improvement += 1
+
+        if es_enabled and epochs_without_improvement >= es_patience:
+            stop_reason = "early_stopping"
+            break
+
+    if (art_root / "best.pt").exists():
+        best_ckpt = torch.load(art_root / "best.pt", map_location=device)
+        model.load_state_dict(best_ckpt["state_dict"])
+    else:
+        best_epoch = epochs
+        best_metric = recall_at_k
+        best_dev_loss_mean = val_loss_mean
+        best_eval_count = n_eval
 
     model.eval()
     with torch.no_grad():
@@ -305,6 +483,10 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
             "hidden_dim": hidden_dim,
             "heads": heads,
             "state_dict": model.state_dict(),
+            "best_epoch": best_epoch,
+            "best_dev_loss_mean": best_dev_loss_mean,
+            "best_dev_recall_at_k": best_metric,
+            "best_dev_recall_k": topk,
         },
         art_root / "model.pt",
     )
@@ -320,7 +502,19 @@ def run_train_teacher(cfg: dict[str, Any]) -> None:
         "negatives_per_positive": negatives_per_positive,
         "train_samples": int(len(samples)),
         "train_users": int(len(histories_by_user)),
+        "dev_samples": int(len(dev_samples)),
         "epochs": epochs,
+        "early_stopping_enabled": es_enabled,
+        "early_stopping_monitor": monitor_name,
+        "early_stopping_patience": es_patience,
+        "early_stopping_min_delta": es_min_delta,
+        "stopped_epoch": epoch,
+        "best_epoch": best_epoch,
+        "best_dev_loss_mean": best_dev_loss_mean,
+        "best_dev_recall_at_k": best_metric,
+        "best_dev_recall_k": topk,
+        "best_dev_recall_n_eval": best_eval_count,
+        "stop_reason": stop_reason,
         "lr": lr,
         "train_loss_mean": train_loss_mean,
         "item_encoder": "sentence_transformer_frozen_plus_projection",
