@@ -19,6 +19,13 @@ MIND is widely used as a benchmark for news recommendation, with impression logs
   - a **user encoder** that attention-pools clicked-history item embeddings into a user vector
 - Training uses clicked positives plus in-impression negatives.
 - Retrieval evaluation encodes each dev impression with that impression's own history, so the query is temporally aligned with the impression being scored.
+- At the end of `train_teacher`, the pipeline writes:
+  - `item_teacher_emb.npy`: the final teacher embedding for every news item
+  - `user_teacher_emb.npy`: the final teacher embedding for each training user history
+- These files are then reused by later stages:
+  - `build_index` builds the Faiss retrieval index from `item_teacher_emb.npy`
+  - `eval_retrieval` uses `item_teacher_emb.npy` and the saved teacher model to encode dev histories and search that index
+  - `train_ranker` loads both `item_teacher_emb.npy` and `user_teacher_emb.npy` as teacher targets for distillation and teacher-guided fusion
 
 #### Teacher and retrieval notes
 - In MIND `behaviors.tsv`, `history` is a list of previously clicked news IDs for that user before the current impression time. It is not a list of previous impressions.
@@ -268,13 +275,13 @@ Teacher retrieval:
 - best teacher epoch: `2`
 
 Student ranker:
-- `nDCG@5 = 0.27896`
-- `nDCG@10 = 0.34136`
-- `MRR = 0.29738`
-- `AUC = 0.57350`
-- `MAP@10 = 0.24975`
-- best dev AUC during training: `0.57441` at epoch `5`
-- calibration changed `Brier` from `0.1112` to `0.0875`
+- `nDCG@5 = 0.28481`
+- `nDCG@10 = 0.34293`
+- `MRR = 0.30098`
+- `AUC = 0.57720`
+- `MAP@10 = 0.25191`
+- best dev AUC during training: `0.58208` at epoch `5`
+- calibration changed `Brier` from `0.1424` to `0.0790`
 
 Feasible reranker operating point:
 - `nDCG@10 = 0.32740`

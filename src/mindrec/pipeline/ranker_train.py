@@ -16,7 +16,6 @@ from mindrec.data.datasets import PairDataset, collate_batch
 from mindrec.data.featurize import IdMaps
 from mindrec.models.calibration import fit_temperature_scaler
 from mindrec.models.dlrm import DLRMStudent
-from mindrec.models.distill import pairwise_logit_distill_bce, repr_distill_mse
 from mindrec.utils import set_seed, save_json, to_device
 
 
@@ -144,13 +143,14 @@ def run_train_ranker(cfg: dict[str, Any]) -> None:
             if dist_enabled:
                 # teacher logit as cosine / inner product (embeddings are normalized)
                 tlogit = (tu * ti).sum(dim=1)
-                loss_logit = pairwise_logit_distill_bce(
-                    logits, tlogit, temperature=temp
+                target = torch.sigmoid(tlogit / temp)
+                loss_logit = nn.functional.binary_cross_entropy_with_logits(
+                    logits, target, reduction="none"
                 )
 
                 t_repr = torch.cat([tu, ti], dim=1)
                 s_repr = proj(rep)
-                loss_repr = repr_distill_mse(s_repr, t_repr)
+                loss_repr = ((s_repr - t_repr) ** 2).mean(dim=1)
 
                 cold_mask = (
                     (batch["is_cold_user"] == 1) | (batch["is_new_item"] == 1)
@@ -158,9 +158,8 @@ def run_train_ranker(cfg: dict[str, Any]) -> None:
                 w = (cold_mask * w_cold) + ((1.0 - cold_mask) * w_warm)
                 w = w.detach()
 
-                loss = loss + (
-                    w.mean() * (lam_logit * loss_logit + lam_repr * loss_repr)
-                )
+                distill_loss = (w * (lam_logit * loss_logit + lam_repr * loss_repr)).mean()
+                loss = loss + distill_loss
 
             opt.zero_grad()
             loss.backward()
